@@ -11,10 +11,8 @@ class Colors:
     DIM = '\033[2m'        # Dim color for less important info
 
 # Default configuration values
-DEFAULT_NUM_SAMPLES = 10
+DEFAULT_NUM_SAMPLES = 20
 DEFAULT_SAMPLE_INTERVAL = 0.5
-DEFAULT_MEAN_TEMP_THRESHOLD = 85
-DEFAULT_TEMP_THRESHOLD_OK = 92
 DEFAULT_TEMP_VIZ_CHAR = "●" 
 DEFAULT_FREQ_MODE = "all_cores"
 MIN_MAX_CPU_FREQ_MHZ = 800 # Minimum frequency for throttling
@@ -26,3 +24,14 @@ SENSORS_CMD_PATH = None
 CPUPOWER_CMD_PATH = None 
 SYSTEM_ABSOLUTE_MAX_FREQ_MHZ = None # Auto-detected or user-set absolute max CPU freq
 COLUMN_WIDTHS = {}
+
+
+# --- Throttling & Recovery Settings ---
+DEFAULT_TEMP_THRESHOLD_SAFE = 80   # Recovery starts when below this
+DEFAULT_MEAN_TEMP_THRESHOLD = 90
+DEFAULT_TEMP_THRESHOLD_OK = 95
+
+FREQ_UP_STEP_MHZ = 50                # How much to jump per step
+FREQ_DOWN_STEP_MHZ = 200              # How much to drop per step
+# This will be populated at runtime to ensure we don't over-boost
+INITIAL_MAX_FREQ_MHZ = 4100

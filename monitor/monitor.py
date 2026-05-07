@@ -37,20 +37,30 @@ def print_header():
     # Calculate plain text line width including separators " | " (3 chars each, 4 separators)
     return ts_w + 3 + temp_w + 3 + cpumax_w + 3 + freq_w + 3 + status_w
 
+import re
+
+def strip_ansi(text):
+    """Utility to remove ANSI codes for length calculations."""
+    return re.sub(r'\033\[[0-9;]*m', '', text)
 
 def main_loop(args_param): # Renamed args to args_param to avoid conflict with module name
     """
     Main function to run the CPU monitoring script.
     """
     plain_text_line_width = print_header()
-    # Get column widths from config where print_header stored them
+    
+    # Capture the INITIAL state of the CPU so we know our 'ceiling'
+    initial_ghz = get_cpupower_max_freq_ghz()
+    if isinstance(initial_ghz, float):
+        config.INITIAL_MAX_FREQ_MHZ = int(initial_ghz * 1000)
+    
     ts_w = config.COLUMN_WIDTHS["ts_w"]
     temp_w = config.COLUMN_WIDTHS["temp_w"]
     cpumax_w = config.COLUMN_WIDTHS["cpumax_w"]
     freq_w = config.COLUMN_WIDTHS["freq_w"]
     status_w = config.COLUMN_WIDTHS["status_w"]
 
-    throttling_cooldown = 0 # Cooldown counter for throttling
+    throttling_cooldown = 0
 
     try:
         while True:
@@ -185,37 +195,43 @@ def main_loop(args_param): # Renamed args to args_param to avoid conflict with m
                 f"{part_status}{' ' * (status_w - len_part_status_actual)}"
             )
 
-            # --- Throttling Logic ---
-            if config.CPUPOWER_CMD_PATH: # Only attempt throttling if cpupower is available
+            # --- BIDIRECTIONAL FREQUENCY CONTROL ---
+            if config.CPUPOWER_CMD_PATH and config.INITIAL_MAX_FREQ_MHZ:
                 if throttling_cooldown > 0:
                     throttling_cooldown -= 1
-                # Ensure values are numbers before comparison
-                elif isinstance(temp_max, int) and isinstance(temp_mean, int) and isinstance(freq_max, int):
-                    count_over_threhold = 0
-                    if temp_max >= config.DEFAULT_TEMP_THRESHOLD_OK:
-                        count_over_threhold += 1
-                    if temp_mean >= config.DEFAULT_MEAN_TEMP_THRESHOLD:
-                        count_over_threhold += 1
-                    if count_over_threhold > 0:
-                        if freq_max != "N/A" and isinstance(freq_max, int):
-                            new_target_max_mhz = freq_max - 200 * count_over_threhold
-                            new_target_max_mhz_rounded = max(config.MIN_MAX_CPU_FREQ_MHZ, (new_target_max_mhz // 100) * 100)
+                
+                elif isinstance(temp_max, int) and isinstance(freq_max, int):
+                    current_limit_mhz = int(get_cpupower_max_freq_ghz() * 1000)
+                    new_limit_mhz = current_limit_mhz
+                    
+                    # CASE A: THROTTLE DOWN (Too Hot)
+                    if temp_max >= args_param.temp_threshold_ok or temp_mean >= config.DEFAULT_MEAN_TEMP_THRESHOLD:
+                        severity = 1 + (1 if temp_max >= args_param.temp_threshold_ok + 10 else 0)
+                        drop_amount = config.FREQ_DOWN_STEP_MHZ * severity
+                        new_limit_mhz = max(config.MIN_MAX_CPU_FREQ_MHZ, current_limit_mhz - drop_amount)
+                        
+                        if new_limit_mhz < current_limit_mhz:
+                            if set_cpupower_max_freq_mhz(new_limit_mhz):
+                                throttling_cooldown = 2 # Shorter cooldown for safety
+                                sys.stderr.write(f"\n{config.Colors.FAIL}🔥\tCOOLING: Temp {temp_max}°C. Throttling to {new_limit_mhz}MHz{config.Colors.ENDC}\n")
 
-                            if new_target_max_mhz_rounded < freq_max:
-                                if set_cpupower_max_freq_mhz(new_target_max_mhz_rounded):
-                                    throttling_cooldown = 1
-                                    if args_param.verbose or not args_param.quiet:
-                                        sys.stderr.write(f"{config.Colors.FAIL}THROTTLING: CPU too hot (MaxT:{temp_max}°C, MeanT:{temp_mean}°C). Attempting to set max freq to {new_target_max_mhz_rounded}MHz.{config.Colors.ENDC}\n")
-                                        sys.stderr.flush()
+                    # CASE B: RECOVERY (Cool enough to boost)
+                    elif temp_max <= config.DEFAULT_TEMP_THRESHOLD_SAFE:
+                        # Only boost if we are currently below the hardware's initial max
+                        if current_limit_mhz < config.INITIAL_MAX_FREQ_MHZ:
+                            new_limit_mhz = min(config.INITIAL_MAX_FREQ_MHZ, current_limit_mhz + config.FREQ_UP_STEP_MHZ)
+                            
+                            if set_cpupower_max_freq_mhz(new_limit_mhz):
+                                throttling_cooldown = 5 # Longer cooldown to prevent "jitter"
+                                sys.stderr.write(f"\n{config.Colors.OKGREEN}❄️\tRECOVERY: Temp {temp_max}°C. Boosting to {new_limit_mhz}MHz{config.Colors.ENDC}\n")
+
             sys.stdout.flush()
 
     except KeyboardInterrupt:
-        print(f"\n{config.Colors.OKGREEN}Monitoring stopped by user.{config.Colors.ENDC}")
-    except Exception as e:
-        print(f"\n{config.Colors.FAIL}An unexpected error occurred: {e}{config.Colors.ENDC}")
-        if config.cli_args and config.cli_args.verbose:
-            import traceback
-            traceback.print_exc()
+        # Senior Tip: Always try to reset the CPU to initial max on exit!
+        if config.INITIAL_MAX_FREQ_MHZ:
+             set_cpupower_max_freq_mhz(config.INITIAL_MAX_FREQ_MHZ)
+        print(f"\n{config.Colors.OKGREEN}Monitoring stopped. Frequency reset to {config.INITIAL_MAX_FREQ_MHZ}MHz.{config.Colors.ENDC}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Monitor CPU temperature and frequency.",
