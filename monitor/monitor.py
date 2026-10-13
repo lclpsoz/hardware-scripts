@@ -7,6 +7,29 @@ import config # Import the config module
 from system_query import get_cpu_temp, get_all_cpu_freqs_single_sample, get_max_cpu_freq_single_sample, get_cpupower_max_freq_ghz, set_cpupower_max_freq_mhz
 from core_utils import calculate_stats, get_temp_color, get_freq_color
 
+# Named frequency profiles (MHz) accepted by --max-freq
+FREQ_PROFILES_MHZ = {
+    "min": 800,
+    "mid": 2000,
+    "safe": 3000,
+    "max": 4100,
+}
+DEFAULT_FREQ_PROFILE = "safe"
+
+def parse_max_freq(value):
+    """argparse type: accepts a profile name (min/mid/safe/max) or a plain integer in MHz."""
+    key = value.strip().lower()
+    if key in FREQ_PROFILES_MHZ:
+        return FREQ_PROFILES_MHZ[key]
+    try:
+        mhz = int(key)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"invalid value '{value}': use a profile ({', '.join(FREQ_PROFILES_MHZ)}) or an integer in MHz")
+    if mhz <= 0:
+        raise argparse.ArgumentTypeError("frequency must be a positive number of MHz")
+    return mhz
+
 def print_header():
     """Prints the table header."""
     # Previous: ts_w, temp_w, cpumax_w, freq_w, status_w = 16, 22, 15, 20, 12
@@ -277,9 +300,12 @@ if __name__ == "__main__":
                         help="Frequency collection mode: "
                              "'all_cores' (default): Collects all core frequencies for true min/mean/max. "
                              "'max_per_sample': Collects only the max core frequency at each sample point.")
-    parser.add_argument("-m", "--max-freq", type=int, default=None, metavar="MHZ",
-                        help="Set the CPU max frequency policy (MHz). This becomes the new policy max "
-                             "and the ceiling for automatic thermal recovery. It is kept on exit.")
+    parser.add_argument("-m", "--max-freq", type=parse_max_freq, nargs="?",
+                        default=DEFAULT_FREQ_PROFILE, const=DEFAULT_FREQ_PROFILE, metavar="PROFILE|MHZ",
+                        help="Set the CPU max frequency policy. Accepts a profile "
+                             f"({', '.join(f'{k}={v}MHz' for k, v in FREQ_PROFILES_MHZ.items())}) or a value in MHz. "
+                             "This becomes the new policy max and the ceiling for automatic thermal recovery. "
+                             "It is kept on exit.")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="Enable verbose output for debugging.")
     parser.add_argument("-q", "--quiet", action="store_true",
