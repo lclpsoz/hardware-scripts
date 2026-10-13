@@ -52,8 +52,37 @@ def main_loop(args_param): # Renamed args to args_param to avoid conflict with m
     # Capture the INITIAL state of the CPU so we know our 'ceiling'
     initial_ghz = get_cpupower_max_freq_ghz()
     if isinstance(initial_ghz, float):
-        config.INITIAL_MAX_FREQ_MHZ = int(initial_ghz * 1000)
-    
+        config.INITIAL_MAX_FREQ_MHZ = round(initial_ghz * 1000)
+
+    # --max-freq is a request. The effective policy max is whatever the hardware/kernel
+    # actually accepted, so we read it back and use that as the ceiling.
+    if args_param.max_freq is not None:
+        if not config.CPUPOWER_CMD_PATH:
+            sys.stderr.write(f"{config.Colors.WARNING}Warning: --max-freq ignored, 'cpupower' not available.{config.Colors.ENDC}\n")
+        else:
+            requested_mhz = max(args_param.max_freq, config.MIN_MAX_CPU_FREQ_MHZ)
+            if requested_mhz != args_param.max_freq:
+                sys.stderr.write(f"{config.Colors.WARNING}Warning: --max-freq {args_param.max_freq}MHz is below the script "
+                                 f"minimum ({config.MIN_MAX_CPU_FREQ_MHZ}MHz). Using the minimum.{config.Colors.ENDC}\n")
+
+            set_ok = set_cpupower_max_freq_mhz(requested_mhz)
+            if not set_ok:
+                sys.stderr.write(f"{config.Colors.FAIL}Error: cpupower rejected {requested_mhz}MHz. "
+                                 f"Keeping the current policy.{config.Colors.ENDC}\n")
+
+            # Read back what the policy really is now (works whether the set succeeded, was clamped, or failed)
+            effective_ghz = get_cpupower_max_freq_ghz()
+            if isinstance(effective_ghz, float):
+                effective_mhz = round(effective_ghz * 1000)
+                config.INITIAL_MAX_FREQ_MHZ = effective_mhz  # real policy max / ceiling
+                if abs(effective_mhz - requested_mhz) > 10:  # tolerate GHz rounding
+                    sys.stderr.write(f"{config.Colors.WARNING}Warning: requested {requested_mhz}MHz but hardware/driver "
+                                     f"limits it to {effective_mhz}MHz. Using {effective_mhz}MHz as policy max."
+                                     f"{config.Colors.ENDC}\n")
+            else:
+                sys.stderr.write(f"{config.Colors.WARNING}Warning: could not read back the policy max. "
+                                 f"Ceiling stays at {config.INITIAL_MAX_FREQ_MHZ}MHz.{config.Colors.ENDC}\n")
+
     ts_w = config.COLUMN_WIDTHS["ts_w"]
     temp_w = config.COLUMN_WIDTHS["temp_w"]
     cpumax_w = config.COLUMN_WIDTHS["cpumax_w"]
@@ -248,6 +277,9 @@ if __name__ == "__main__":
                         help="Frequency collection mode: "
                              "'all_cores' (default): Collects all core frequencies for true min/mean/max. "
                              "'max_per_sample': Collects only the max core frequency at each sample point.")
+    parser.add_argument("-m", "--max-freq", type=int, default=None, metavar="MHZ",
+                        help="Set the CPU max frequency policy (MHz). This becomes the new policy max "
+                             "and the ceiling for automatic thermal recovery. It is kept on exit.")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="Enable verbose output for debugging.")
     parser.add_argument("-q", "--quiet", action="store_true",
