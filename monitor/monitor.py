@@ -4,6 +4,7 @@ import argparse
 import time
 import shutil # For shutil.which
 import config # Import the config module
+import subprocess
 from system_query import get_cpu_temp, get_all_cpu_freqs_single_sample, get_max_cpu_freq_single_sample, get_cpupower_max_freq_ghz, set_cpupower_max_freq_mhz
 from core_utils import calculate_stats, get_temp_color, get_freq_color
 
@@ -29,6 +30,64 @@ def parse_max_freq(value):
     if mhz <= 0:
         raise argparse.ArgumentTypeError("frequency must be a positive number of MHz")
     return mhz
+
+NO_TURBO_PATH = "/sys/devices/system/cpu/intel_pstate/no_turbo"
+CPUINFO_MAX_FREQ_PATH = "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq"
+
+def _read_int(path):
+    """Reads an integer from a sysfs file. Returns None if unavailable."""
+    try:
+        with open(path, "r") as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return None
+
+def _write_no_turbo(value):
+    """Writes no_turbo directly, falling back to 'sudo tee' if we lack permission."""
+    try:
+        with open(NO_TURBO_PATH, "w") as f:
+            f.write(str(value))
+        return True
+    except PermissionError:
+        pass  # not root, try sudo below
+    except OSError:
+        return False
+    try:
+        subprocess.run(["sudo", "tee", NO_TURBO_PATH], input=f"{value}\n", text=True,
+                       stdout=subprocess.DEVNULL, check=True)
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
+def ensure_turbo_enabled(quiet=False):
+    """Startup check: reports the no_turbo state and clears it (sets 0) if turbo is disabled."""
+    before = _read_int(NO_TURBO_PATH)
+    if before is None:
+        if not quiet:
+            print(f"{config.Colors.DIM}INFO: intel_pstate no_turbo not available, skipping turbo check.{config.Colors.ENDC}", file=sys.stderr)
+        return
+    if before == 0:
+        if not quiet:
+            print(f"{config.Colors.DIM}INFO: Turbo already enabled (no_turbo=0).{config.Colors.ENDC}", file=sys.stderr)
+        return
+
+    hw_before_khz = _read_int(CPUINFO_MAX_FREQ_PATH)
+    print(f"{config.Colors.WARNING}WARN: Turbo was DISABLED (no_turbo=1, hardware max "
+          f"{hw_before_khz // 1000 if hw_before_khz else 'N/A'}MHz). Enabling it...{config.Colors.ENDC}", file=sys.stderr)
+
+    if not _write_no_turbo(0):
+        print(f"{config.Colors.FAIL}Error: could not write no_turbo=0. Run as root or check sudo permissions. "
+              f"Turbo stays disabled.{config.Colors.ENDC}", file=sys.stderr)
+        return
+
+    after = _read_int(NO_TURBO_PATH)
+    hw_after_khz = _read_int(CPUINFO_MAX_FREQ_PATH)
+    if after == 0:
+        print(f"{config.Colors.OKGREEN}INFO: no_turbo changed 1 -> 0. Turbo enabled, hardware max now "
+              f"{hw_after_khz // 1000 if hw_after_khz else 'N/A'}MHz.{config.Colors.ENDC}", file=sys.stderr)
+    else:
+        print(f"{config.Colors.FAIL}Error: no_turbo reads {after} after the write. "
+              f"Something else is overriding it.{config.Colors.ENDC}", file=sys.stderr)
 
 def print_header():
     """Prints the table header."""
@@ -351,4 +410,5 @@ if __name__ == "__main__":
         print(f"{config.Colors.FAIL}Error: Cannot access /proc/cpuinfo. This script is intended for Linux systems.{config.Colors.ENDC}", file=sys.stderr)
         sys.exit(1)
 
+    ensure_turbo_enabled(config.cli_args.quiet)
     main_loop(config.cli_args)
