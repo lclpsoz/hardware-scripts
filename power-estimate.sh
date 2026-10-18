@@ -1,9 +1,10 @@
 #!/bin/bash
-# power-estimate.sh v2 - Laptop wall-power estimate with GPU, screen and charger losses (Linux)
+# power-estimate.sh v3 - Laptop wall-power estimate with GPU, screen and charger losses (Linux)
 # Run:  sudo ./power-estimate.sh
 # Tunables (env vars): INTERVAL PRICE_KWH CURRENCY HOURS_PER_DAY
 #   GPU_IDLE_W GPU_MAX_W GPU_OFF_W  SCREEN_MIN_W SCREEN_MAX_W  REST_W  CHARGER_EFF
 #   CPU_IDLE_W CPU_MAX_W (only used if RAPL is unreadable)
+#   CHARGER_W (bar scale, default 135)  BAR_W (bar width, default 24)  NO_COLOR=1 (disable colors)
 # Example: sudo PRICE_KWH=1.1 CURRENCY=BRL HOURS_PER_DAY=24 ./power-estimate.sh
 
 set -u
@@ -22,6 +23,16 @@ REST_W="${REST_W:-6}"                # RAM, SSD, WiFi, fans, keyboard LEDs, chip
 CHARGER_EFF="${CHARGER_EFF:-0.88}"   # AC adapter efficiency (typically 0.85-0.92)
 CPU_IDLE_W="${CPU_IDLE_W:-4}"
 CPU_MAX_W="${CPU_MAX_W:-45}"
+CHARGER_W="${CHARGER_W:-135}"        # charger rating, used as the 100% mark of the bar
+BAR_W="${BAR_W:-24}"                 # bar width in characters
+
+# ---------- Colors (disabled when piping to a file or NO_COLOR is set) ----------
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+    RST=$'\033[0m'; BOLD=$'\033[1m'; DIM=$'\033[2m'
+    RED=$'\033[31m'; GRN=$'\033[32m'; YEL=$'\033[33m'; BLU=$'\033[34m'; MAG=$'\033[35m'; CYN=$'\033[36m'
+else
+    RST=""; BOLD=""; DIM=""; RED=""; GRN=""; YEL=""; BLU=""; MAG=""; CYN=""
+fi
 
 # ---------- Battery ----------
 BATTERIES=(/sys/class/power_supply/BAT*)
@@ -108,18 +119,24 @@ read_cpu() {
     CPU_IDLE=$((i + io))
 }
 
-# ---------- Setup ----------
-echo "Power estimator v2 (Ctrl+C for summary)"
-[ ${#BATTERIES[@]} -gt 0 ] && echo " - Battery: found" || echo " - Battery: not found"
-[ -n "$PKG_DIR" ] && echo " - CPU RAPL: found ($PKG_DIR)" || echo " - CPU RAPL: not readable (run with sudo) -> CPU load model"
-if [ -n "$GPU_PCI" ] && command -v nvidia-smi >/dev/null; then
-    echo " - GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n1) (power sensor usually N/A -> modelled)"
-else
-    echo " - GPU: no NVIDIA GPU/driver detected"
-fi
-echo " - Screen: ${BL_DIR:-no backlight found, assuming mid brightness}"
-echo " - Price: $PRICE_KWH $CURRENCY/kWh, charger efficiency $CHARGER_EFF"
+# ---------- Pretty helpers ----------
+ok()   { printf '%s✔%s' "$GRN" "$RST"; }
+fail() { printf '%s✘%s' "$RED" "$RST"; }
+
+# ---------- Setup / banner ----------
 echo
+echo "${BOLD}${CYN}⚡ Power estimator v3${RST}  ${DIM}(Ctrl+C for summary)${RST}"
+echo "${DIM}──────────────────────────────────────────────────────────────${RST}"
+if [ ${#BATTERIES[@]} -gt 0 ]; then echo " $(ok) Battery   ${DIM}found${RST}"; else echo " $(fail) Battery   ${DIM}not found${RST}"; fi
+if [ -n "$PKG_DIR" ]; then echo " $(ok) CPU RAPL  ${DIM}$PKG_DIR${RST}"; else echo " $(fail) CPU RAPL  ${DIM}not readable (run with sudo) -> CPU load model${RST}"; fi
+if [ -n "$GPU_PCI" ] && command -v nvidia-smi >/dev/null; then
+    echo " $(ok) GPU       ${DIM}$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n1) (power sensor usually N/A -> modelled)${RST}"
+else
+    echo " $(fail) GPU       ${DIM}no NVIDIA GPU/driver detected${RST}"
+fi
+if [ -n "$BL_DIR" ]; then echo " $(ok) Screen    ${DIM}$BL_DIR${RST}"; else echo " $(fail) Screen    ${DIM}no backlight found, assuming mid brightness${RST}"; fi
+echo " ${DIM}•${RST} Price ${BOLD}$PRICE_KWH $CURRENCY/kWh${RST}${DIM}, charger efficiency $CHARGER_EFF, bar scale ${CHARGER_W}W${RST}"
+echo "${DIM}──────────────────────────────────────────────────────────────${RST}"
 
 read_cpu; prev_total=$CPU_TOTAL; prev_idle=$CPU_IDLE
 prev_pkg=0; [ -n "$PKG_DIR" ] && prev_pkg=$(<"$PKG_DIR/energy_uj")
@@ -127,12 +144,20 @@ prev_t=$(date +%s.%N); start_t=$prev_t
 energy_wh=0; samples=0; sum_w=0; peak_w=0
 
 summary() {
-    echo
-    awk -v e="$energy_wh" -v p="$PRICE_KWH" -v c="$CURRENCY" -v s="$sum_w" -v n="$samples" \
-        -v pk="$peak_w" -v start="$start_t" -v end="$(date +%s.%N)" 'BEGIN{
+    local mins avg kwh cost
+    read -r mins avg kwh cost <<< "$(awk -v e="$energy_wh" -v p="$PRICE_KWH" -v s="$sum_w" -v n="$samples" \
+        -v start="$start_t" -v end="$(date +%s.%N)" 'BEGIN{
             avg=(n>0)?s/n:0
-            printf "Summary: %.1f min | avg %.1f W | peak %.1f W | %.4f kWh | cost %.4f %s\n", (end-start)/60, avg, pk, e/1000, e/1000*p, c
-        }'
+            printf "%.1f %.1f %.4f %.4f", (end-start)/60, avg, e/1000, e/1000*p
+        }')"
+    echo
+    echo "${DIM}══════════════════════════════════════════════════════════════${RST}"
+    echo "${BOLD}${CYN}⚡ Summary${RST}"
+    echo "   Duration  ${BOLD}${mins} min${RST}"
+    echo "   Average   ${BOLD}${avg} W${RST}   ${DIM}peak${RST} ${BOLD}$(printf '%.1f' "$peak_w") W${RST}"
+    echo "   Energy    ${BOLD}${kwh} kWh${RST}"
+    echo "   Cost      ${BOLD}${GRN}${cost} ${CURRENCY}${RST}"
+    echo "${DIM}══════════════════════════════════════════════════════════════${RST}"
     exit 0
 }
 trap summary INT TERM
@@ -170,14 +195,12 @@ while true; do
     # DC-side model of the whole machine
     model_dc=$(awk -v a="$cpu_w" -v b="$GPU_W" -v c="$scr_w" -v d="$REST_W" 'BEGIN{printf "%.1f", a+b+c+d}')
 
-    chg=0
+    chg=0; measured=0
     if [ "$bat_status" = "Discharging" ] && [ -n "$bat_w" ] && awk -v w="$bat_w" 'BEGIN{exit !(w>0)}'; then
-        watts=$bat_w
-        src="BATTERY MEASURED (model says ${model_dc}W)"
+        watts=$bat_w; measured=1
     else
         [ "$bat_status" = "Charging" ] && chg=${bat_w:-0}
         watts=$(awk -v m="$model_dc" -v c="$chg" -v e="$CHARGER_EFF" 'BEGIN{printf "%.1f", (m+c)/e}')
-        src="model, AC wall"
     fi
 
     energy_wh=$(awk -v e="$energy_wh" -v w="$watts" -v dt="$dt" 'BEGIN{printf "%.6f", e + w*dt/3600}')
@@ -185,11 +208,56 @@ while true; do
     peak_w=$(awk -v p="$peak_w" -v w="$watts" 'BEGIN{print (w>p)?w:p}')
     samples=$((samples + 1)); prev_t=$now
 
-    awk -v w="$watts" -v u="$util" -v cpu="$cpu_w" -v gpu="$GPU_W" -v gs="$GPU_STATE" -v gu="$GPU_UTIL" \
-        -v scr="$scr_w" -v rest="$REST_W" -v chg="$chg" -v src="$src" \
-        -v e="$energy_wh" -v s="$sum_w" -v n="$samples" -v p="$PRICE_KWH" -v c="$CURRENCY" -v h="$HOURS_PER_DAY" 'BEGIN{
-            avg=s/n
-            printf "%6.1f W | cpu %4.1f (%3.0f%%) gpu %4.1f (%s %s%%) scr %3.1f rest %3.1f chg %4.1f | avg %5.1f | %.4f kWh | %.4f %s | ~%.2f %s/mo @%dh/d [%s]\n",
-                w, cpu, u, gpu, gs, gu, scr, rest, chg, avg, e/1000, e/1000*p, c, avg/1000*h*30*p, c, h, src
-        }'
+    # ----- Derived display values -----
+    read -r avg kwh cost month pct delta level <<< "$(awk -v w="$watts" -v s="$sum_w" -v n="$samples" \
+        -v e="$energy_wh" -v p="$PRICE_KWH" -v h="$HOURS_PER_DAY" -v cw="$CHARGER_W" \
+        -v m="$model_dc" -v meas="$measured" 'BEGIN{
+            avg=s/n; kwh=e/1000; pct=w/cw*100
+            delta=(meas && w>0) ? (m-w)/w*100 : 0
+            level=(pct<35)?0:((pct<70)?1:2)
+            printf "%.1f %.4f %.4f %.2f %.0f %+.0f %d", avg, kwh, kwh*p, avg/1000*h*30*p, pct, delta, level
+        }')"
+
+    case "$level" in
+        0) LC="$GRN" ;;
+        1) LC="$YEL" ;;
+        *) LC="$RED" ;;
+    esac
+
+    filled=$(( (pct * BAR_W + 50) / 100 )); [ "$filled" -gt "$BAR_W" ] && filled=$BAR_W
+    printf -v bar '%*s' "$filled" ''; bar=${bar// /█}
+    printf -v pad '%*s' "$((BAR_W - filled))" ''; pad=${pad// /░}
+
+    case "$GPU_STATE" in
+        off)    GC="$DIM" ;;
+        sensor) GC="$GRN" ;;
+        model)  GC="$YEL" ;;
+        *)      GC="$DIM" ;;
+    esac
+    CHC="$DIM"; awk -v c="$chg" 'BEGIN{exit !(c>0)}' && CHC="$YEL"
+
+    if [ "$measured" -eq 1 ]; then
+        src="${GRN}● battery measured${RST} ${DIM}(model Δ${delta}%)${RST}"
+    elif [ "$chg" != "0" ]; then
+        src="${YEL}● AC wall + charging${RST}"
+    else
+        src="${CYN}● AC wall (model)${RST}"
+    fi
+
+    printf -v ts '%(%H:%M:%S)T' -1
+    printf -v w_s '%6.1f' "$watts"
+    printf -v pk_s '%.1f' "$peak_w"
+    printf -v cpu_s '%5.1f' "$cpu_w"
+    printf -v gpu_s '%5.1f' "$GPU_W"
+    printf -v scr_s '%4.1f' "$scr_w"
+    printf -v rest_s '%4.1f' "$REST_W"
+    printf -v chg_s '%5.1f' "$chg"
+    printf -v pct_s '%3d' "$pct"
+    printf -v util_s '%3.0f' "$util"
+    printf -v gu_s '%3d' "$GPU_UTIL"
+
+    # Line 1: time, total watts, bar, running stats, source
+    printf '%s\n' "${DIM}${ts}${RST}  ${LC}${BOLD}⚡${w_s} W${RST}  ${LC}${bar}${RST}${DIM}${pad}${RST} ${pct_s}%  ${DIM}│${RST} avg ${BOLD}${avg} W${RST}  peak ${BOLD}${pk_s} W${RST}  ${DIM}│${RST} ${src}"
+    # Line 2: breakdown + energy and cost
+    printf '%s\n' "          ${BLU}CPU${RST} ${cpu_s} W ${DIM}(${util_s}%)${RST}  ${MAG}GPU${RST} ${GC}${gpu_s} W ${DIM}(${GPU_STATE} ${gu_s}%)${RST}  ${CYN}SCR${RST} ${scr_s}  ${DIM}REST${RST} ${rest_s}  ${CHC}CHG ${chg_s}${RST}  ${DIM}│${RST} ${kwh} kWh  ${BOLD}${cost} ${CURRENCY}${RST}  ${DIM}~${month} ${CURRENCY}/mo @${HOURS_PER_DAY}h/d${RST}"
 done
