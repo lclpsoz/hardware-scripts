@@ -13,12 +13,14 @@ written every 15 minutes when changed, so the SD card sees very few writes.
 
 Endpoints (token in header X-Token or ?t=):
   GET  /  or /ui              web page (no token; it asks for the token itself)
-  GET  /steps?steps=N         phone reports its cumulative step counter
+  GET  /steps?steps=N         phone reports its cumulative step counter; the reply says
+                              {"next_s": seconds to wait} (normal or walking interval)
   POST /snooze?min=60&kind=meeting   (kind: meeting|nap)
   GET  /resume                cancel the snooze
   GET  /status                small JSON state
   GET  /api/state             everything the page shows
-  GET  /api/samples?hours=3   every phone report (time, counter) of the last 1-24 h
+  GET  /api/samples?hours=1   phone reports (time, counter) of the last 1-24 h, thinned to ~900 points
+  GET  /phone.sh              the Termux loop script (no token)
   POST /api/settings          JSON body with any settings, validated
   POST /api/test              send a test notification
   GET  /health                no token
@@ -43,6 +45,7 @@ PORT = int(E("STEPS_PORT", "8097"))
 PUBLIC = E("STEPS_PUBLIC_URL", "http://192.168.0.250:8097")  # used by the snooze buttons
 DATA = E("DATA_DIR", "/data")
 UI_FILE = E("UI_FILE", "/app/ui.html")
+PHONE_FILE = E("PHONE_FILE", "/app/phone.sh")
 KEEP_DAYS = 365
 KEEP_REPORTS_H = 24
 
@@ -65,11 +68,15 @@ DEFAULTS = {
     "quiet_end": QE,
     "meeting_min": int(E("MEETING_MIN", "60")),
     "nap_min": int(E("NAP_MIN", "30")),
+    "report_idle_s": int(E("REPORT_IDLE_S", "60")),     # how often the phone should report normally
+    "report_walk_s": int(E("REPORT_WALK_S", "10")),     # ... while you are walking
+    "walk_spm": int(E("WALK_SPM", "20")),               # steps per minute that count as walking
 }
+WALK_HOLD_S = 60      # keep reporting fast this long after the last walking seen
 SET = dict(DEFAULTS)
 
 lock = threading.Lock()
-S = {"last_move": time.time(), "snooze_until": 0.0, "snooze_kind": "", "last_sample": 0.0,
+S = {"last_move": time.time(), "snooze_until": 0.0, "snooze_kind": "", "last_sample": 0.0, "walk_until": 0.0, "stats_flush": 0.0,
      "stale_told": False, "level_sent": 0, "last_repeat": 0.0, "steps": None, "started": time.time()}
 samples = deque()
 stats = {}            # "YYYY-MM-DD" -> day record
@@ -119,9 +126,7 @@ def append_report(rec):
     global appended
     try:
         with open(os.path.join(DATA, "reports.jsonl"), "a") as f:
-            f.write(json.dumps(rec) + "\n")
-            f.flush()
-            os.fsync(f.fileno())
+            f.write(json.dumps(rec) + "\n")   # no fsync: one per report would wear the SD card
         appended += 1
     except OSError as e:
         log("report not saved:", e)
@@ -145,6 +150,7 @@ def compact_reports():
 
 def flush_stats(force=False):
     global stats_dirty
+    S["stats_flush"] = time.time()
     if stats_dirty or force:
         cutoff = time.strftime("%Y-%m-%d", time.localtime(time.time() - KEEP_DAYS * 86400))
         for k in [k for k in stats if k < cutoff]:
@@ -225,6 +231,9 @@ def validate(d):
     num("stale_min", 5, 240)
     num("meeting_min", 1, 600)
     num("nap_min", 1, 600)
+    num("report_idle_s", 5, 600)
+    num("report_walk_s", 2, 120)
+    num("walk_spm", 5, 200)
     hhmm("quiet_start")
     hhmm("quiet_end")
     if "levels_min" in d:
@@ -297,8 +306,12 @@ def reset(t, why):
 
 
 def add_sample(n):
+    """Record a report. Returns how many seconds the phone should wait before the next one."""
     t = time.time()
     with lock:
+        pt, pn = S["last_sample"], S["steps"]
+        if pt and pn is not None and 0 < t - pt <= 300 and n >= pn and (n - pn) / (t - pt) * 60 >= SET["walk_spm"]:
+            S["walk_until"] = t + WALK_HOLD_S
         reports.append([int(t), n])
         append_report(reports[-1])
         while reports and reports[0][0] < t - KEEP_REPORTS_H * 3600:
@@ -330,6 +343,11 @@ def add_sample(n):
             reset(t, f"{n - first} steps in {int(t - samples[0][0])}s")
             samples.clear()
             samples.append((t, n))
+        return next_report_s(t)
+
+
+def next_report_s(t):
+    return SET["report_walk_s"] if t < S["walk_until"] else SET["report_idle_s"]
 
 
 def tick():
@@ -411,7 +429,8 @@ def state(t):
         "mode": mode, "sitting_min": round((t - S["last_move"]) / 60, 1), "level": S["level_sent"],
         "steps": S["steps"], "last_sample_age_s": round(t - S["last_sample"]) if S["last_sample"] else None,
         "snooze_left_min": round(max(0, S["snooze_until"] - t) / 60, 1), "snooze_kind": S["snooze_kind"],
-        "quiet_now": quiet, "uptime_min": round((t - S["started"]) / 60)}
+        "quiet_now": quiet, "uptime_min": round((t - S["started"]) / 60),
+        "walking": t < S["walk_until"], "report_every_s": next_report_s(t)}
 
 
 def full_state():
@@ -452,15 +471,22 @@ class H(BaseHTTPRequestHandler):
                     return self.reply(200, f.read(), "text/html; charset=utf-8")
             except OSError:
                 return self.reply(404, {"error": "no ui"})
+        if u.path == "/phone.sh":        # the Termux loop; holds no secrets
+            try:
+                with open(PHONE_FILE, "rb") as f:
+                    return self.reply(200, f.read(), "text/plain; charset=utf-8")
+            except OSError:
+                return self.reply(404, {"error": "no script"})
         tok = self.headers.get("X-Token") or (q.get("t") or [""])[0]
         if not TOKEN or not hmac.compare_digest(tok, TOKEN):
             return self.reply(403, {"error": "forbidden"})
         try:
             if u.path == "/steps":
-                add_sample(int(float(q["steps"][0])))
+                nxt = add_sample(int(float(q["steps"][0])))
                 with lock:
-                    flush_stats()
-                return self.reply(200, {"ok": True})
+                    if time.time() - S["stats_flush"] >= 60:      # at most once a minute
+                        flush_stats()
+                return self.reply(200, {"ok": True, "next_s": nxt})
             if u.path == "/snooze":
                 m = max(1, min(600, int((q.get("min") or [SET["meeting_min"]])[0])))
                 kind = (q.get("kind") or ["meeting"])[0][:10]
@@ -485,8 +511,13 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/samples":
                 h = max(1, min(KEEP_REPORTS_H, int((q.get("hours") or [3])[0])))
                 t = time.time()
+                gap, out, last = h * 3600 / 900, [], 0   # about 900 points at most
                 with lock:
-                    out = [x for x in reports if x[0] >= t - h * 3600]
+                    rows = [x for x in reports if x[0] >= t - h * 3600]
+                for i, x in enumerate(rows):
+                    if i == len(rows) - 1 or len(x) == 3 or x[0] - last >= gap:
+                        out.append(x)
+                        last = x[0]
                 return self.reply(200, {"now": int(t), "hours": h, "samples": out})
             if u.path == "/api/settings" and self.command == "POST":
                 ok, err = validate(self.body_json())

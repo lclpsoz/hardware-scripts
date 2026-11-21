@@ -14,6 +14,7 @@ services:
     volumes:
       - ./steps.py:/app/steps.py:ro
       - ./ui.html:/app/ui.html:ro
+      - ./steps-loop.sh:/app/phone.sh:ro
       - ./data:/data
     read_only: true
     tmpfs:

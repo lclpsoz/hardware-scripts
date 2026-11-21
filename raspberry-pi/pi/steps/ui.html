@@ -130,7 +130,7 @@
 
     <div class="row" style="justify-content:space-between;margin-top:28px">
       <h2 style="margin:0">Phone data</h2>
-      <div class="seg" id="rng"><button data-h="3" class="on">3 h</button><button data-h="12">12 h</button><button data-h="24">24 h</button></div>
+      <div class="seg" id="rng"><button data-h="1" class="on">1 h</button><button data-h="3">3 h</button><button data-h="12">12 h</button><button data-h="24">24 h</button></div>
     </div>
 
     <h2>Steps per minute</h2>
@@ -175,6 +175,13 @@
         <label class="f">Meeting snooze (min)<input type="number" id="s_meeting_min" min="1" max="600"></label>
         <label class="f">Nap snooze (min)<input type="number" id="s_nap_min" min="1" max="600"></label>
       </div>
+      <p class="hint" style="margin-top:14px">How often the phone sends its step count (the phone loop follows these, no change needed there):</p>
+      <div class="form">
+        <label class="f">Normally, every (s)<input type="number" id="s_report_idle_s" min="5" max="600"></label>
+        <label class="f">While walking, every (s)<input type="number" id="s_report_walk_s" min="2" max="120"></label>
+        <label class="f">Walking means (steps/min)<input type="number" id="s_walk_spm" min="5" max="200"></label>
+      </div>
+      <p class="hint" id="repNow"></p>
       <div class="row" style="margin-top:14px">
         <label class="check"><input type="checkbox" id="s_quiet_enabled"> Quiet hours</label>
         <input type="text" id="s_quiet_start" maxlength="5" placeholder="22:00" inputmode="numeric" style="width:5em"> to
@@ -218,6 +225,7 @@ function fillForm(s) {
   $('s_repeat_s').value = s.repeat_s; $('s_move_steps').value = s.move_steps;
   $('s_move_window_min').value = Math.round(s.move_window_s / 60); $('s_stale_min').value = s.stale_min;
   $('s_meeting_min').value = s.meeting_min; $('s_nap_min').value = s.nap_min;
+  $('s_report_idle_s').value = s.report_idle_s; $('s_report_walk_s').value = s.report_walk_s; $('s_walk_spm').value = s.walk_spm;
   $('s_quiet_enabled').checked = s.quiet_enabled; $('s_quiet_start').value = s.quiet_start; $('s_quiet_end').value = s.quiet_end;
 }
 function readForm() {
@@ -227,6 +235,7 @@ function readForm() {
     repeat_s: Number($('s_repeat_s').value), move_steps: Number($('s_move_steps').value),
     move_window_s: Number($('s_move_window_min').value) * 60, stale_min: Number($('s_stale_min').value),
     meeting_min: Number($('s_meeting_min').value), nap_min: Number($('s_nap_min').value),
+    report_idle_s: Number($('s_report_idle_s').value), report_walk_s: Number($('s_report_walk_s').value), walk_spm: Number($('s_walk_spm').value),
     quiet_enabled: $('s_quiet_enabled').checked, quiet_start: $('s_quiet_start').value, quiet_end: $('s_quiet_end').value
   };
 }
@@ -264,6 +273,7 @@ function render(d) {
   $('tRemN').textContent = r[0] + ' light · ' + r[1] + ' mid · ' + r[2] + ' high · ' + r[3] + ' constant';
   $('tLong').textContent = Math.round(t.longest_min) + ' min';
   $('tMoves').textContent = t.moves; $('tSnz').textContent = t.snoozes.meeting + ' meeting · ' + t.snoozes.nap + ' nap snoozes';
+  $('repNow').textContent = 'Right now the phone is asked to report every ' + st.report_every_s + ' s' + (st.walking ? ' (walking detected).' : '.') + ' The change reaches the phone after its next report.';
   $('tAge').textContent = fmtAge(st.last_sample_age_s); $('tCount').textContent = st.steps == null ? '' : 'counter ' + st.steps.toLocaleString();
 
   const svg = $('hours'); svg.textContent = '';
@@ -288,7 +298,7 @@ function render(d) {
 }
 
 const NS = 'http://www.w3.org/2000/svg';
-let range = 3;
+let range = 1;
 function el(tag, attrs, parent, text) {
   const e = document.createElementNS(NS, tag);
   for (const k in attrs) e.setAttribute(k, attrs[k]);
@@ -301,7 +311,7 @@ function niceMax(v) { const p = Math.pow(10, Math.floor(Math.log10(v))); for (co
 const G = { W: 480, H: 160, L: 36, R: 474, T: 18, B: 136 };
 function frame(svg, t0, t1, ymax, unit) {
   svg.textContent = '';
-  const span = t1 - t0, hours = span / 3600, step = hours <= 3 ? 1800 : hours <= 12 ? 7200 : 14400;
+  const span = t1 - t0, hours = span / 3600, step = hours <= 1 ? 600 : hours <= 3 ? 1800 : hours <= 12 ? 7200 : 14400;
   const off = -new Date().getTimezoneOffset() * 60;
   const X = t => G.L + (t - t0) / span * (G.R - G.L), Y = v => G.B - v / ymax * (G.B - G.T);
   [0, 0.5, 1].forEach(f => {
@@ -310,32 +320,44 @@ function frame(svg, t0, t1, ymax, unit) {
   });
   for (let t = Math.ceil((t0 + off) / step) * step - off; t <= t1; t += step) {
     el('line', { class: 'grid', x1: X(t), x2: X(t), y1: G.B, y2: G.B + 3 }, svg);
-    el('text', { x: X(t), y: G.B + 14, 'text-anchor': 'middle' }, svg, hhmm(t));
+    if (X(t) <= G.R - 14) el('text', { x: X(t), y: G.B + 14, 'text-anchor': 'middle' }, svg, hhmm(t));
   }
   if (unit) el('text', { x: G.L, y: 9, 'text-anchor': 'start' }, svg, unit);
   return { X, Y };
 }
-const GAP_MIN = 6;   // minutes without a report that count as "no data"
+let GAP_MIN = 6;   // minutes without a report that count as "no data" (set from the report interval)
 
 function drawRate(j) {
   const svg = $('rate'), s = j.samples, t1 = j.now, t0 = t1 - j.hours * 3600;
-  const thr = settings.move_steps / (settings.move_window_s / 60), bars = [];
-  let total = 0, peak = 0;
+  const thr = settings.move_steps / (settings.move_window_s / 60);
+  // Steps per minute: cut time into buckets (1 min for 1 h, wider for longer ranges) and spread
+  // each interval between two reports over the buckets it covers. Gaps and phone restarts add nothing.
+  const bw = Math.max(60, Math.round(j.hours * 3600 / 120 / 60) * 60), nb = Math.ceil((t1 - t0) / bw);
+  const steps = new Array(nb).fill(0), cov = new Array(nb).fill(0);
+  let total = 0;
   for (let i = 1; i < s.length; i++) {
-    const dt = (s[i][0] - s[i - 1][0]) / 60, d = s[i][1] - s[i - 1][1];
-    if (d < 0 || dt <= 0 || dt > GAP_MIN * 1.7) continue;   // phone rebooted, or a gap
-    const spm = d / dt; bars.push([s[i - 1][0], s[i][0], spm, d]); total += d; peak = Math.max(peak, spm);
+    const a = s[i - 1][0], b = s[i][0], d = s[i][1] - s[i - 1][1];
+    if (d < 0 || b <= a || (b - a) / 60 > GAP_MIN * 1.7) continue;
+    total += d;
+    for (let k = Math.max(0, Math.floor((a - t0) / bw)); k < nb && t0 + k * bw < b; k++) {
+      const lo = Math.max(a, t0 + k * bw), hi = Math.min(b, t0 + (k + 1) * bw);
+      if (hi > lo) { steps[k] += d * (hi - lo) / (b - a); cov[k] += hi - lo; }
+    }
+  }
+  const bars = [];
+  let peak = 0, covered = 0;
+  for (let k = 0; k < nb; k++) if (cov[k] >= Math.min(30, bw / 2)) {
+    const spm = steps[k] / (cov[k] / 60); bars.push([t0 + k * bw, t0 + (k + 1) * bw, spm, steps[k]]); peak = Math.max(peak, spm); covered += cov[k];
   }
   const ymax = niceMax(Math.max(peak * 1.05, thr * 1.4, 10)), { X, Y } = frame(svg, t0, t1, ymax, 'steps per minute');
   bars.forEach(b => {
     const x = X(b[0]), w = Math.max(1.2, X(b[1]) - x - 0.5), h = Math.max(b[2] ? 1 : 0, G.B - Y(b[2]));
     const r = el('rect', { class: b[2] >= thr ? 'hi' : 'lo', x, y: G.B - h, width: w, height: h, rx: 1 }, svg);
-    el('title', {}, r, hhmm(b[0]) + '–' + hhmm(b[1]) + ' · ' + b[2].toFixed(1) + ' steps/min (' + b[3] + ' steps)');
+    el('title', {}, r, hhmm(b[0]) + '–' + hhmm(b[1]) + ' · ' + b[2].toFixed(1) + ' steps/min (' + Math.round(b[3]) + ' steps)');
   });
   el('line', { class: 'thr', x1: G.L, x2: G.R, y1: Y(thr), y2: Y(thr) }, svg);
   el('text', { class: 'warn', x: G.R, y: Y(thr) - 3, 'text-anchor': 'end' }, svg, 'moving: ' + Math.round(thr) + '/min');
-  const mins = bars.reduce((a, b) => a + (b[1] - b[0]) / 60, 0);
-  $('rateNote').textContent = bars.length ? total + ' steps over ' + Math.round(mins) + ' min of data · average ' + (total / mins).toFixed(1) + '/min · fastest ' + peak.toFixed(0) + '/min' : 'Not enough reports yet (need two in a row).';
+  $('rateNote').textContent = bars.length ? total + ' steps over ' + Math.round(covered / 60) + ' min of data · average ' + (total / (covered / 60)).toFixed(1) + '/min · fastest ' + peak.toFixed(0) + '/min · one bar = ' + (bw >= 120 ? bw / 60 + ' min' : '1 min') : 'Not enough reports yet (need two in a row).';
 }
 
 function drawReports(j) {
@@ -345,7 +367,7 @@ function drawReports(j) {
   if (hi - lo < 10) { hi = lo + 10; }
   const pad = (hi - lo) * 0.08, vmin = Math.max(0, Math.floor(lo - pad)), vmax = Math.ceil(hi + pad);
   svg.textContent = '';
-  const span = t1 - t0, hours = span / 3600, step = hours <= 3 ? 1800 : hours <= 12 ? 7200 : 14400, off = -new Date().getTimezoneOffset() * 60;
+  const span = t1 - t0, hours = span / 3600, step = hours <= 1 ? 600 : hours <= 3 ? 1800 : hours <= 12 ? 7200 : 14400, off = -new Date().getTimezoneOffset() * 60;
   const X = t => G.L + (t - t0) / span * (G.R - G.L), Y = v => G.B - (v - vmin) / (vmax - vmin) * (G.B - G.T);
   [0, 0.5, 1].forEach(f => {
     const v = vmin + (vmax - vmin) * f;
@@ -354,7 +376,7 @@ function drawReports(j) {
   });
   for (let t = Math.ceil((t0 + off) / step) * step - off; t <= t1; t += step) {
     el('line', { class: 'grid', x1: X(t), x2: X(t), y1: G.B, y2: G.B + 3 }, svg);
-    el('text', { x: X(t), y: G.B + 14, 'text-anchor': 'middle' }, svg, hhmm(t));
+    if (X(t) <= G.R - 14) el('text', { x: X(t), y: G.B + 14, 'text-anchor': 'middle' }, svg, hhmm(t));
   }
   el('text', { x: G.L, y: 9 }, svg, 'step counter value');
   // gaps: before the first report, between reports, and since the last one
@@ -379,7 +401,7 @@ function drawReports(j) {
   } else el('text', { x: 240, y: 80, 'text-anchor': 'middle' }, svg, 'no reports in this period');
   const gaps = []; for (let i = 1; i < s.length; i++) gaps.push((s[i][0] - s[i - 1][0]) / 60);
   const typical = gaps.length ? gaps.slice().sort((a, b) => a - b)[Math.floor(gaps.length / 2)] : null;
-  $('repNote').textContent = s.length + ' reports' + (typical ? ' · usually every ' + typical.toFixed(1) + ' min' : '') + (longest ? ' · longest silence ' + Math.round(longest) + ' min' : '');
+  $('repNote').textContent = s.length + ' reports' + (typical ? ' · usually every ' + (typical < 1.5 ? Math.round(typical * 60) + ' s' : typical.toFixed(1) + ' min') : '') + (longest ? ' · longest silence ' + Math.round(longest) + ' min' : '');
   const body = $('recent'); body.textContent = '';
   s.slice(-8).reverse().forEach((x, k, arr) => {
     const idx = s.length - 1 - k, prev = idx ? s[idx - 1] : null, tr = document.createElement('tr');
@@ -391,7 +413,7 @@ function drawReports(j) {
   });
 }
 async function loadSamples() {
-  try { const j = await api('/api/samples?hours=' + range); drawRate(j); drawReports(j); } catch (e) { if (e.message !== 'token') msg('Cannot load reports: ' + e.message, 'err'); }
+  try { GAP_MIN = Math.max(6, 3 * (settings.report_idle_s || 60) / 60); const j = await api('/api/samples?hours=' + range); drawRate(j); drawReports(j); } catch (e) { if (e.message !== 'token') msg('Cannot load reports: ' + e.message, 'err'); }
 }
 document.querySelectorAll('#rng button').forEach(b => b.onclick = () => {
   range = Number(b.dataset.h);
