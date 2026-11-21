@@ -90,7 +90,9 @@ DEFAULTS = {
     # snooze buttons: [minutes, offered only while sitting under this many minutes (0 = always)]
     "snooze_opts": [[30, 90], [5, 110], [1, 0]],
     "phone_alarm": True,                # at the last level the phone loop plays a loud alarm
-    "alarm_text": "Time to walk",        # what the phone says on the alarm volume
+    "alarm_mode": "timer",              # "timer": a 1-second Clock-app timer labelled with the phrase; "speech": text-to-speech
+    "alarm_text": "Time to walk",        # the timer's label, or what the phone says
+    "alarm_repeat_s": 60,               # at most one phone alarm per this many seconds
     "alarm_volume": 50,                 # alarm volume, percent of the phone's maximum
     "notif": NOTIF_DEFAULTS,
     "report_idle_s": int(E("REPORT_IDLE_S", "60")),     # how often the phone should report normally
@@ -101,7 +103,7 @@ WALK_HOLD_S = 60      # keep reporting fast this long after the last walking see
 SET = copy.deepcopy(DEFAULTS)
 
 lock = threading.Lock()
-S = {"last_move": time.time(), "snooze_start": 0.0, "snooze_until": 0.0, "snooze_kind": "", "last_sample": 0.0, "walk_until": 0.0, "stats_flush": 0.0, "alarm_test": False,
+S = {"last_move": time.time(), "snooze_start": 0.0, "snooze_until": 0.0, "snooze_kind": "", "last_sample": 0.0, "walk_until": 0.0, "stats_flush": 0.0, "alarm_test": False, "last_alarm": 0.0,
      "stale_told": False, "level_sent": 0, "last_repeat": 0.0, "steps": None, "started": time.time()}
 samples = deque()
 stats = {}            # "YYYY-MM-DD" -> day record
@@ -262,6 +264,12 @@ def validate(d):
     num("move_window_s", 60, 3600)
     num("stale_min", 5, 240)
     num("alarm_volume", 10, 100)
+    num("alarm_repeat_s", 10, 3600)
+    if "alarm_mode" in d:
+        if d["alarm_mode"] in ("timer", "speech"):
+            out["alarm_mode"] = d["alarm_mode"]
+        else:
+            err.append("alarm_mode must be timer or speech")
     if "alarm_text" in d:
         txt = str(d["alarm_text"]).strip()
         if re.fullmatch(r"[\w .,!?'-]{1,60}", txt):
@@ -619,12 +627,14 @@ class H(BaseHTTPRequestHandler):
                     if time.time() - S["stats_flush"] >= 60:      # at most once a minute
                         flush_stats()
                     now = time.time()
-                    alarm = alarm_active(now) or S["alarm_test"]
-                    S["alarm_test"] = False                       # the debug test plays once
+                    test, S["alarm_test"] = S["alarm_test"], False     # the debug test plays once
+                    due = test or (alarm_active(now) and now - S["last_alarm"] >= SET["alarm_repeat_s"])
+                    if due:
+                        S["last_alarm"] = now
                     nxt = min(nxt, next_report_s(now))            # fast reports as the last level nears
-                out = {"ok": True, "next_s": nxt, "alarm": int(alarm)}
-                if alarm:
-                    out["say"], out["vol"] = SET["alarm_text"], SET["alarm_volume"]
+                out = {"ok": True, "next_s": nxt, "alarm": int(due)}
+                if due:
+                    out.update(mode=SET["alarm_mode"], say=SET["alarm_text"], vol=SET["alarm_volume"])
                 return self.reply(200, out)
             if u.path == "/snooze":
                 m = int((q.get("min") or [0])[0])
