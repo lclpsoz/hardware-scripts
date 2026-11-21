@@ -1,117 +1,107 @@
-# Raspberry Pi (`rasp-al-gaib-lite`): investigation, 2026-11-20
+# Raspberry Pi (`rasp-al-gaib-lite`)
 
-A read-only investigation over SSH on 20 Nov 2026, 19:30-20:10. **Nothing on the Pi was changed.** Everything below is a finding or a proposal for us to discuss.
+A Raspberry Pi 3 Model B (1 GB, Debian 13) at 192.168.0.250 running Pi-hole, NetAlertX, Beszel, a `.lan` proxy and an internet-quality logger, all in Docker. **Start at http://home.lan.**
 
-The Pi is a Raspberry Pi 3 Model B (1 GB) running Debian 13, with Pi-hole, NetAlertX and Beszel in Docker, on 192.168.0.250.
+This folder holds:
 
-## What I found, most important first
+- the investigation and its decisions (the numbered docs);
+- the configuration that runs on the Pi ([pi/](pi/));
+- the change log ([CHANGES.md](CHANGES.md)).
 
-1. **Undervoltage is still a power-supply problem.** There were 20 events in 78 h while the CPU is pinned at 600 MHz. One busy core was enough to trigger one, and two happened with the Pi idle. The board draws far less than a healthy 2.5 A supply delivers, so the supply, the cable or the connector is at fault. The software limits only make events rarer. → [01-undervoltage.md](01-undervoltage.md)
-2. **Pi-hole blocks ads only for the TV.** The only blocklist (StevenBlack, 77k domains) is assigned to the TV's group alone, so the `Default` group that every other device uses has none. I confirmed it live: `doubleclick.net` resolves normally for this laptop. → [02-pihole.md](02-pihole.md#2-only-the-tv-gets-a-blocklist)
-3. **The "150 concurrent queries" warning is not a resource limit.** It happened at 4 moments in 3 days, each time one device was loading ad-heavy pages: 596 queries in 10 s, with about a third of the forwards never answered. Unanswered queries hold dnsmasq's 150 slots. Fixing item 2 would have answered about half of those names locally. → [02-pihole.md](02-pihole.md#1-the-maximum-number-of-concurrent-dns-queries-reached-max-150-warning)
-4. **NetAlertX is slow because of a bug in its own code, not because of your 10 devices.** Every translated word re-reads all 24 language files: 52 times per page, 421 ms each, about 22 s per page. I wrote a 15-line patch and tested it: same output, 0.3 ms. The 0.5-CPU limit (throttled in 63% of periods) and the 600 MHz clock make it worse. → [03-netalertx.md](03-netalertx.md)
-5. **The TV makes 35% of all DNS queries** (37.6k a day) because it keeps retrying blocked time servers. Allowing two time domains for the TV group stops it. → [02-pihole.md](02-pihole.md#3-the-tv-retries-blocked-time-servers-about-a-third-of-all-queries)
-6. **The router nearly tripped Pi-hole's rate limit:** 953 queries in one minute, against a limit of 1000. Devices that use the router's IPv6 address for DNS all appear as one client, 192.168.0.1. At the limit they would all lose DNS at once. → [02-pihole.md](02-pihole.md#4-the-router-hides-devices-and-nearly-hit-the-rate-limit)
-7. **Yes, the resources are still limited:** 600 MHz CPU, NetAlertX at half a core, the dpkg backup throttled. Keep the limits until a new supply passes a load test. Wi-Fi off should stay off anyway, because the firewall rules rely on the Pi having one address. → [04-resource-limits.md](04-resource-limits.md)
-8. **Smaller items:**
-   - Something on HDMI with an empty EDID is re-probed every 10 s (8.4k log lines a day).
-   - About 1.46 GB a day is written to the SD card.
-   - 34 package updates are pending, some of them security fixes.
-   - SSH still accepts passwords, and NetAlertX has no password.
-   - Pi-hole's database grows 9 MB a day with 91-day retention.
+## Status on 2026-11-20, 21:20
 
-   → [05-system-health.md](05-system-health.md)
+| Area | State |
+| --- | --- |
+| Power | Still marginal: 20 undervoltage events during today's upgrade alone. The CPU stays limited until the new supply arrives and passes [the load test](scripts/uv-step-load-test.sh). |
+| Ad blocking | On for every device again (StevenBlack). A stronger list plus a work allowlist is proposed ([10](10-ad-blocking.md)). |
+| NetAlertX | **Fixed:** pages went from 14-40 s to about 1.3 s ([03](03-netalertx.md)) |
+| Names | **New:** `home.lan`, `pihole.lan`, `netalertx.lan`, `beszel.lan`, `power.lan`, `net.lan` ([07](07-services.md)) |
+| Internet quality | **New:** `net.lan`, measuring every minute; first speed test 59.7 / 42.0 Mbps, capped by the Pi ([08](08-internet-quality.md)) |
+| Pi-hole | `DBinterval` is 300. Rate limit and concurrency limit unchanged, with recommendations in [02](02-pihole.md#8-can-the-limits-go-up-follow-up-2026-11-20-evening). |
+| Reboot | Pending for kernel 6.18.60. The boot files were verified intact. Best done after the power supply arrives. |
+| HDMI | Root cause found. Turning it off needs root, and the commands are ready ([05](05-system-health.md#why-hdmi-says-connected-with-nothing-plugged-in)). |
 
-Ideas for more uses of the Pi: [06-ideas.md](06-ideas.md). Top picks: Tailscale, encrypted upstream DNS, phone alerts, and an internet-quality logger.
+## Answers to your questions
 
-## Suggested order when you're back
+- **Is ad blocking active for all IPs?** Yes. The list is now on `Default` and the TV group, and `doubleclick.net`, `googleads` and `taboola` return `0.0.0.0` from the laptop. You still see ads because:
+  - StevenBlack is exact-match only;
+  - YouTube, Instagram and search ads come from the same domains as the content.
 
-| Phase | What | Risk | Depends on power fix? |
-| --- | --- | --- | --- |
-| 0. Quick wins | Pi-hole: give `Default` the blocklist, allow the TV's time domains, raise the rate limit to 5000, keep 30 days of history. NetAlertX: the `lang()` patch, `LOG_LEVEL` minimal, a UI password. | Low. Each change is a single setting with a one-line undo. | No |
-| 1. Power | Tell me the supply and cable model. Unplug HDMI as a test. Optionally install the flight recorder first to get a baseline. New 5.1 V / 2.5 A supply. Step load test. | None (unplugging HDMI) to low (the load test pushes the Pi on purpose) | This is the power fix |
-| 2. Unlock | Governor back to `ondemand`, NetAlertX to 1 CPU, `apt full-upgrade`, Pi-hole image update, upstream change, maybe a stronger blocklist | Medium: updates and heavier load | Yes |
-| 3. Harden and extend | SSH keys only, Docker log defaults, cleanup, Tailscale, ntfy alerts, backups | Low | Partly |
+  HaGeZi Pro would block 957 of the 2,863 names your devices resolved in a day, against 350 for StevenBlack. It needs two allow entries so it doesn't break BetterStack and AWS for work. A browser blocker (uBlock Origin) covers same-domain ads. → [10-ad-blocking.md](10-ad-blocking.md)
+- **Risks of optimizing the NetAlertX UI?** Very low, so it's applied: lint passed, identical output, and a one-command rollback. The one ongoing duty is to recheck the patch when the NetAlertX image changes, and `pi-checkup.sh` now warns about that. → [03-netalertx.md](03-netalertx.md)
+- **HDMI isn't connected, so what causes it?** The Pi's own hot-plug line reads "connected". The driver then invents fallback modes and re-checks every 10 s, logging 8,400 lines a day. Nothing external is involved. The fix is `video=HDMI-A-1:d` in `cmdline.txt`, which needs root. → [05-system-health.md](05-system-health.md#why-hdmi-says-connected-with-nothing-plugged-in)
+- **Are the SD writes too much?** Not for wear: about 1.46 GB a day, roughly 0.5 TB a year, while even cautious estimates for a 64 GB card are several TB. The bigger risk is writing during undervoltage. `DBinterval` 300 and the HDMI fix reduce writes further. → [05-system-health.md](05-system-health.md#are-the-sd-card-writes-too-much)
+- **The work laptop (192.168.0.9) and its ad peaks?** Not many tabs. Each burst started with one ad-heavy news or entertainment page. Header-bidding ads make one such page look up 90-190 names within a minute. Separately, one work API name is looked up about 180 times a minute (scripts without a DNS cache), which counts toward the rate limit. → [02-pihole.md](02-pihole.md#8-can-the-limits-go-up-follow-up-2026-11-20-evening)
+- **What can we do about the DNS limits?** Both can go up safely: they are safety valves, not resource limits. Recommended:
+  - rate limit 1000 → 5000 per minute (this laptop hit 1,097 at 20:22);
+  - concurrent forwards 150 → 512.
 
-## Questions for you
+  Blocking helps most, because blocked names never go upstream. Faster upstreams and encrypted DNS help next. → [02-pihole.md](02-pihole.md#8-can-the-limits-go-up-follow-up-2026-11-20-evening)
+- **The TV is unplugged except when in use.** Its retry storm (35% of queries) returns each time it's connected, unless its two time domains are allowed. → [02-pihole.md](02-pihole.md#3-the-tv-retries-blocked-time-servers-about-a-third-of-all-queries)
+- **Impact of the upgrade you ran?** No damage found:
+  - no file-system errors;
+  - the package database is consistent;
+  - the boot files match their sources;
+  - all containers came back healthy.
 
-1. **Power supply:** brand and model, rated voltage and current, captive or separate cable, cable length? What else is plugged into that strip?
-2. **HDMI:** what is plugged into the Pi's HDMI port (TV, monitor, adapter)? Is it needed?
-3. **Blocklist:** was removing the blocklist from the `Default` group intentional? I assume not.
-4. **192.168.0.9:** a device with a random (private) MAC, VS Code and Microsoft telemetry, and the ad-heavy browsing behind the warnings. A work laptop?
-5. **TV time sync:** OK to let the TV sync time (two domains, TV group only)?
-6. **Upstream DNS:** any preference between Google (current), Cloudflare and Quad9? Do you want encrypted upstream DNS?
-7. **Flight recorder:** OK to install it ([01-undervoltage.md](01-undervoltage.md#1-a-flight-recorder-for-the-60-s-before-each-event))? It writes only when an event happens.
+  It did cause 20 undervoltage events in ten minutes. A reboot is pending. → [05-system-health.md](05-system-health.md#impact-of-the-apt-upgrade-you-ran-2032-2039)
+- **How would encrypted upstream DNS help?** It hides your lookups from Claro and protects the answers from tampering. It may also smooth the burst losses, and choosing Cloudflare would stop Google receiving your /24. Recommended: dnsproxy with DNS-over-TLS to Cloudflare and Quad9. Avoid cloudflared, which Cloudflare has deprecated. → [09-encrypted-dns.md](09-encrypted-dns.md)
 
-## Proposed commands (not run)
+## Needs your decision
 
-Run these on the Pi. Pi-hole settings changed with `pihole-FTL --config` apply live and persist in `~/pihole/etc-pihole/pihole.toml`. Check each one by reading the key back, for example `docker exec pihole pihole-FTL --config dns.rateLimit.count`, then test `dig @192.168.0.250 example.com +short` from the laptop.
+1. **Root access.** HDMI off, the reboot, the flight recorder and SSH hardening all need `sudo`, which asks for a password. Options:
+   - (a) Run the commands from the docs yourself.
+   - (b) Add `/etc/sudoers.d/010-lclpsoz-nopasswd` with `lclpsoz ALL=(ALL) NOPASSWD: ALL`, so I can do it. Your user is in the `docker` group, which is already root-equivalent, so this adds little real exposure, and sudo logs every command to the journal.
+   - (c) Let me use the docker group for root-level edits. That works, but it's less transparent than sudo, so I haven't done it.
+2. **Pi-hole:**
+   - rate limit 5000;
+   - `dns-forward-max` 512;
+   - HaGeZi Pro plus 2 work allow entries;
+   - TV time domains allowed;
+   - upstreams switched to Cloudflare, or to the encrypted forwarder.
+3. **Reboot timing:** now, or with the new power supply. It applies kernel 6.18.60 and the HDMI fix.
 
-**Phase 0, Pi-hole (in the web UI unless noted):**
+## Next steps (once decided)
 
-1. Lists page → StevenBlack row → Group assignment → tick **Default** as well → Save. Then from the laptop: `dig @192.168.0.250 doubleclick.net +short` should print `0.0.0.0`.
-2. Domains page → add exact **allow** entries for `time.samsungcloudsolution.com` and `pool.ntp.org`, and a regex allow `(\.|^)pool\.ntp\.org$`. Group assignment: `YouTubeAndPrimeOnly` only.
-3. In a terminal:
-   ```bash
-   docker exec pihole pihole-FTL --config dns.rateLimit.count 5000         # per client per 60 s (default 1000)
-   docker exec pihole pihole-FTL --config database.maxDBdays 30            # default 91
-   docker exec pihole pihole-FTL --config misc.dnsmasq_lines '["dns-forward-max=512"]'   # optional safety margin
-   docker exec pihole sh -c 'grep dns-forward-max /etc/pihole/dnsmasq.conf; tail -n 5 /var/log/pihole/FTL.log'
-   ```
-4. Optional, upstream change: `docker exec pihole pihole-FTL --config dns.upstreams '["1.1.1.1","1.0.0.1"]'`.
+1. When the power supply arrives: reboot, run `scripts/uv-step-load-test.sh`, then lift the limits in the order in [04-resource-limits.md](04-resource-limits.md).
+2. Pi-hole: apply the agreed settings, then watch netq and the Pi-hole warnings for a week.
+3. Optional: the flight recorder ([01](01-undervoltage.md)), the NetAlertX UI password, and more from [06-ideas.md](06-ideas.md) (Tailscale, alerts).
 
-**Phase 0, NetAlertX:**
+## Findings from the first investigation (20 Nov, 19:30-20:10)
 
-- The `lang()` patch: the steps and undo are in [03-netalertx.md](03-netalertx.md#a-patch-lang-locally-recommended-independent-of-the-power-fix).
-- In Settings: `LOG_LEVEL` → `minimal`, and turn on the SETPWD plugin with a password.
+1. **Undervoltage is a supply problem:** 20 events in 78 h at 600 MHz, some with one busy core and two at idle. → [01](01-undervoltage.md)
+2. **Only the TV had a blocklist.** Now fixed by you. → [02](02-pihole.md#2-only-the-tv-gets-a-blocklist)
+3. **"150 concurrent queries"** came from ad-heavy page loads where about a third of the forwards went unanswered. → [02](02-pihole.md#1-the-maximum-number-of-concurrent-dns-queries-reached-max-150-warning)
+4. **NetAlertX's `lang()` bug.** Now patched. → [03](03-netalertx.md)
+5. **The TV's time-sync storm.** → [02](02-pihole.md#3-the-tv-retries-blocked-time-servers-about-a-third-of-all-queries)
+6. **The router aggregates IPv6-DNS devices,** which nearly hit the rate limit. → [02](02-pihole.md#4-the-router-hides-devices-and-nearly-hit-the-rate-limit)
+7. **Resource limits still in place.** → [04](04-resource-limits.md)
+8. **Smaller items:** HDMI, SD writes, updates, SSH passwords, NetAlertX without a password, database growth. → [05](05-system-health.md)
 
-**While waiting for the new supply (optional, reduces load-triggered events only):**
-
-```bash
-# move the nightly dpkg backup away from midnight (NetAlertX updates vendors at 00:00 too)
-sudo mkdir -p /etc/systemd/system/dpkg-db-backup.timer.d
-printf '[Timer]\nOnCalendar=\nOnCalendar=*-*-* 03:30:00\n' | sudo tee /etc/systemd/system/dpkg-db-backup.timer.d/time.conf
-sudo systemctl daemon-reload && systemctl list-timers dpkg-db-backup.timer
-# undo: sudo rm -r /etc/systemd/system/dpkg-db-backup.timer.d && sudo systemctl daemon-reload
-```
-
-To check the healthchecks less often (each one is a `docker exec`, which briefly loads `containerd`), add this to the `pihole` and `netalertx` services in their compose files:
-
-```yaml
-    healthcheck:
-      interval: 5m
-```
-
-Then run `docker compose up -d`. Check with `docker inspect -f '{{json .Config.Healthcheck}}' pihole`: the test should be unchanged and the interval 300000000000.
-
-**Phase 1 and 2:** see [01-undervoltage.md](01-undervoltage.md#what-fixes-it) and [04-resource-limits.md](04-resource-limits.md#order-to-lift-them-once-the-supply-is-fixed).
-
-## Files in this folder
+## Files
 
 | File | What it is |
 | --- | --- |
-| [01-undervoltage.md](01-undervoltage.md) | Every event, the evidence that it is the supply, and how to see more |
-| [02-pihole.md](02-pihole.md) | The 150-query warning, the blocklist assignment, the TV storm, the rate-limit near miss, upstream latency, database growth |
-| [03-netalertx.md](03-netalertx.md) | Why pages take 14-26 s, the tested patch, an upstream issue draft |
+| [01-undervoltage.md](01-undervoltage.md) | Every event, the evidence it is the supply, and how to see more |
+| [02-pihole.md](02-pihole.md) | The 150-query warning, blocklist assignment, TV storm, rate limit, upstream latency, database growth, the DNS limits |
+| [03-netalertx.md](03-netalertx.md) | Why pages took 14-40 s, the applied patch, risks |
 | [04-resource-limits.md](04-resource-limits.md) | What is still limited, and the order to undo it |
-| [05-system-health.md](05-system-health.md) | Security, updates, SD writes, HDMI, Docker, network |
-| [06-ideas.md](06-ideas.md) | More uses for the Pi that fit its limits |
-| [scripts/pi-checkup.sh](scripts/pi-checkup.sh) | Read-only health snapshot. Run it after each change: `ssh pi 'bash -s' < raspberry-pi/scripts/pi-checkup.sh` (add `-- --ui` after `-s` to time NetAlertX pages) |
-| [scripts/uv-flight-recorder.py](scripts/uv-flight-recorder.py), [.service](scripts/uv-flight-recorder.service) | Proposed recorder of the 60 s before each undervoltage event (not installed) |
-| [scripts/uv-step-load-test.sh](scripts/uv-step-load-test.sh) | Proposed load test to check a supply (run it yourself, at the Pi) |
-| [pi/netalertx/lang-cache.patch](pi/netalertx/lang-cache.patch), `lang.php.patched`, `lang.php.v26.10.28.orig` | The NetAlertX fix and the original file |
-| [data/undervoltage-events.csv](data/undervoltage-events.csv) | All 20 events with what the Pi was doing |
-| [data/uv-events-snapshots.log](data/uv-events-snapshots.log) | Copy of the Pi's `/var/log/uv-events.log` |
-| [data/netalertx-scan-cycle-2026-11-20-2000.log](data/netalertx-scan-cycle-2026-11-20-2000.log) | One NetAlertX scan cycle, showing the slow plugin start-up |
+| [05-system-health.md](05-system-health.md) | Security, updates, SD writes, HDMI root cause, upgrade impact |
+| [06-ideas.md](06-ideas.md) | More uses for the Pi |
+| [07-services.md](07-services.md) | The `.lan` names, the proxy and the links page |
+| [08-internet-quality.md](08-internet-quality.md) | netq: what it measures, speed-test limits, operations |
+| [09-encrypted-dns.md](09-encrypted-dns.md) | Encrypted upstream DNS: pros, cons, options, draft |
+| [10-ad-blocking.md](10-ad-blocking.md) | Blocking status, list comparison, what DNS can't block |
+| [CHANGES.md](CHANGES.md) | Everything changed on the Pi, with undo |
+| [pi/](pi/) | What runs on the Pi: compose files, Pi-hole changed settings, systemd units, boot config (secrets redacted), plus the proxy, netq and NetAlertX patch that are deployed from here |
+| [scripts/pi-checkup.sh](scripts/pi-checkup.sh) | Read-only health check: `ssh pi 'bash -s' < raspberry-pi/scripts/pi-checkup.sh` |
+| [scripts/sync-from-pi.sh](scripts/sync-from-pi.sh) | Refresh `pi/` from the Pi, with redaction and a secret guard |
+| [scripts/uv-flight-recorder.py](scripts/uv-flight-recorder.py), [scripts/uv-step-load-test.sh](scripts/uv-step-load-test.sh) | Undervoltage tools (proposed, not installed) |
+| [data/](data/) | Evidence: undervoltage events and snapshots, a NetAlertX scan cycle (redacted) |
 
-## How this was done, and what it cost the Pi
+## Keeping this folder in sync with the Pi
 
-- **Access:** SSH as `lclpsoz`, using the `docker` group. There was no sudo: it needs a password, which I did not ask for. Everything ran read-only, through `docker exec`, read-only SQLite (`-readonly`), `/proc`, `/sys` and the journal.
-- **Background:** your six Claude Docs about this Pi (the undervoltage docs, Beszel, NetAlertX, Pi-hole host networking, and the DNS lockdown runbook).
-- **Side effects:**
-  - **Three undervoltage events, at 19:38, 19:40 and 19:42, were caused by my own database queries.** One long query was still running after I stopped it, so I ended that process. After that I ran heavier queries at `nice 19`. This accidental test is the clearest evidence of how thin the margin is.
-  - **My test lookups appear in the Pi-hole log:** `claude-probe-*.example.com`, `google.com` from the container, and `doubleclick.net` from the laptop.
-  - **Temporary files** I created in the Pi-hole container's `/tmp` were deleted again.
-- **Docs that are now out of date (I didn't edit them):**
-  - "changes, checks and revert" says the supply swap fixed the undervoltage.
-  - The DNS runbook's device list has moved: the TV is now .3, and the phone is probably .5.
+- **Files authored here** (`pi/proxy`, `pi/netq`, `pi/netalertx/lang.php.patched`) are deployed with `scp` to the same path under `~` on the Pi.
+- **Files that live on the Pi** (compose files, Pi-hole settings, systemd units) are pulled with `bash raspberry-pi/scripts/sync-from-pi.sh`. Its drift check reports when a deployed file differs from the repo.
+- **Every change is logged** in [CHANGES.md](CHANGES.md).
+- **This repo is public**, so MAC addresses, the public IP, passwords and tokens are kept out, and raw DNS logs are not committed.
