@@ -61,7 +61,21 @@
   svg text { fill: var(--muted); font-size: 10px; }
   svg .b { fill: var(--accent); }
   .hidden { display: none; }
-  @media (max-width: 480px) { .big { font-size: 36px; } }
+  .scroll { overflow-x: auto; }
+  td.bt, th.bt { width: 30%; }
+  @media (max-width: 560px) {
+    main { padding: 20px 12px 32px; }
+    .big { font-size: 36px; }
+    .grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .tile .value { font-size: 22px; }
+    td.bt, th.bt { display: none; }
+    td, th { padding: 6px 3px; }
+    button { padding: 9px 12px; }
+    .form { grid-template-columns: repeat(2, 1fr); }
+    input[type=number] { width: 100%; }
+    .row .f input[type=number] { width: 4.6em; }
+    #save, #test { flex: 1 1 auto; }
+  }
 </style>
 </head>
 <body>
@@ -83,6 +97,7 @@
         <span id="next" class="hint"></span>
       </div>
       <div class="bar" id="bar"><div class="fill" id="fill"></div></div>
+      <div class="hint" id="legend" style="margin:-4px 0 12px"></div>
       <div class="row" id="snz"></div>
       <div id="snzNote" class="hint"></div>
     </div>
@@ -100,8 +115,8 @@
     <div class="card"><svg id="hours" viewBox="0 0 480 110" width="100%" role="img" aria-label="Steps per hour today"></svg></div>
 
     <h2>Last 14 days</h2>
-    <div class="card"><table>
-      <thead><tr><th>Day</th><th class="n">Steps</th><th style="width:30%"></th><th class="n">Reminders</th><th class="n">Longest</th><th class="n">Snoozes</th></tr></thead>
+    <div class="card scroll"><table>
+      <thead><tr><th>Day</th><th class="n">Steps</th><th class="bt"></th><th class="n">Reminders</th><th class="n">Longest</th><th class="n">Snoozes</th></tr></thead>
       <tbody id="hist"></tbody>
     </table></div>
 
@@ -189,9 +204,10 @@ function render(d) {
   $('bar').querySelectorAll('.mark').forEach(e => e.remove());
   lv.forEach((v, i) => {
     const e = document.createElement('div'); e.className = 'mark'; e.style.left = (v / max * 100) + '%';
-    const sp = document.createElement('span'); sp.textContent = v + ' · ' + ['light', 'mid', 'high', 'constant'][i];
+    const sp = document.createElement('span'); sp.textContent = v;
     e.appendChild(sp); $('bar').appendChild(e);
   });
+  $('legend').textContent = 'Minutes sitting before each reminder: ' + lv.join(' / ') + ' (light, mid, high, constant)';
   const pct = Math.min(100, st.sitting_min / max * 100);
   $('fill').style.width = pct + '%';
   $('fill').style.background = st.level >= 3 ? 'var(--bad)' : st.level >= 1 ? 'var(--warn)' : 'var(--ok)';
@@ -228,7 +244,7 @@ function render(d) {
   d.history.slice().reverse().forEach(x => {
     const tr = document.createElement('tr'), c = (txt, cls) => { const td = document.createElement('td'); if (cls) td.className = cls; td.textContent = txt; tr.appendChild(td); return td; };
     c(x.date.slice(5)); c(x.steps.toLocaleString(), 'n');
-    const bt = c(''); const bar = document.createElement('div'); bar.className = 'mini'; bar.style.width = (x.steps / hmax * 100) + '%'; bt.appendChild(bar);
+    const bt = c('', 'bt'); const bar = document.createElement('div'); bar.className = 'mini'; bar.style.width = (x.steps / hmax * 100) + '%'; bt.appendChild(bar);
     c(x.reminders.reduce((a, b) => a + b, 0), 'n'); c(Math.round(x.longest_min) + ' min', 'n'); c(x.snoozes.meeting + x.snoozes.nap, 'n');
     body.appendChild(tr);
   });
