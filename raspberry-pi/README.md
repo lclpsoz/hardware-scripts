@@ -8,18 +8,18 @@ This folder holds:
 - the configuration that runs on the Pi ([pi/](pi/));
 - the change log ([CHANGES.md](CHANGES.md)).
 
-## Status on 2026-11-20, 21:20
+## Status on 2026-11-20, 22:15
 
 | Area | State |
 | --- | --- |
 | Power | Still marginal: 20 undervoltage events during today's upgrade alone. The CPU stays limited until the new supply arrives and passes [the load test](scripts/uv-step-load-test.sh). |
-| Ad blocking | On for every device again (StevenBlack). A stronger list plus a work allowlist is proposed ([10](10-ad-blocking.md)). |
+| Ad blocking | StevenBlack plus HaGeZi Pro for every device, with a work allowlist (320,161 domains, applied 22:08) ([10](10-ad-blocking.md)) |
 | NetAlertX | **Fixed:** pages went from 14-40 s to about 1.3 s ([03](03-netalertx.md)) |
 | Names | **New:** `home.lan`, `pihole.lan`, `netalertx.lan`, `beszel.lan`, `power.lan`, `net.lan` ([07](07-services.md)) |
 | Internet quality | **New:** `net.lan`, measuring every minute; first speed test 59.7 / 42.0 Mbps, capped by the Pi ([08](08-internet-quality.md)) |
-| Pi-hole | `DBinterval` is 300. Rate limit and concurrency limit unchanged, with recommendations in [02](02-pihole.md#8-can-the-limits-go-up-follow-up-2026-11-20-evening). |
-| Reboot | Pending for kernel 6.18.60. The boot files were verified intact. Best done after the power supply arrives. |
-| HDMI | Root cause found. Turning it off needs root, and the commands are ready ([05](05-system-health.md#why-hdmi-says-connected-with-nothing-plugged-in)). |
+| Pi-hole | Updated to core 6.6 / FTL 6.9. `DBinterval` 300. Upstream is now the encrypted forwarder ([09](09-encrypted-dns.md)). Rate limit and concurrency limit left as they are by choice, to be re-evaluated after some days with the new list ([02](02-pihole.md#8-can-the-limits-go-up-follow-up-2026-11-20-evening)). |
+| Reboot | Done 21:56: kernel 6.18.60 running, all containers healthy. |
+| HDMI | Off (done by you with sudo); 0 phantom-connect messages after the reboot ([05](05-system-health.md#why-hdmi-says-connected-with-nothing-plugged-in)) |
 
 ## Answers to your questions
 
@@ -49,6 +49,7 @@ This folder holds:
 
 ## Needs your decision
 
+0. **Run once with sudo:** `sudo bash ~/apply-root-changes.sh` on the Pi. It fixes the power.lan history across reboots (the page used `journalctl -k`, which shows only the current boot), installs the undervoltage flight recorder, and fixes the netplan file permissions. The files are already on the Pi ([scripts/apply-root-changes.sh](scripts/apply-root-changes.sh)).
 1. **Root access.** HDMI off, the reboot, the flight recorder and SSH hardening all need `sudo`, which asks for a password. Options:
    - (a) Run the commands from the docs yourself.
    - (b) Add `/etc/sudoers.d/010-lclpsoz-nopasswd` with `lclpsoz ALL=(ALL) NOPASSWD: ALL`, so I can do it. Your user is in the `docker` group, which is already root-equivalent, so this adds little real exposure, and sudo logs every command to the journal.
