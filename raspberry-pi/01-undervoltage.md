@@ -86,7 +86,7 @@ If the device is an HDMI-to-VGA or similar active adapter, it is powered from th
 | `dpkg-db-backup` (gzip) | 00:00 daily | Capped at 20% CPU with `Nice=19` since 19 Nov, and it still coincided with the 20 Nov midnight event |
 | NetAlertX `update_vendors.sh` | 00:00, 06:00, 12:00, 18:00 | Downloads the IEEE vendor list and sorts it twice. At 00:00 it overlaps with the dpkg backup. |
 | `apt-get update` (apt-daily) | Random times | 19 Nov 19:58 |
-| `apt-daily-upgrade` (apt.systemd.daily) | 06:11 daily (random delay up to 60 min) | 21 Nov 06:11:51: `apt-get` at 90 to 100% of one core for 24 s, with `uv-web` and NetAlertX on top. Two short events (6 s and 4 s). No CPU quota set on this unit. Proposal: a `CPUQuota=30%`, `Nice=19` drop-in, done as a root script. |
+| `apt-daily-upgrade` (apt.systemd.daily) | 06:11 daily (random delay up to 60 min) | 21 Nov 06:11:51: `apt-get` at 90 to 100% of one core for 24 s, with `uv-web` and NetAlertX on top. Two short events (6 s and 4 s). No CPU quota set on this unit. Limited by a `CPUQuota=30%`, `Nice=19`, idle-IO drop-in ([scripts/apply-apt-limit-and-uvweb.sh](scripts/apply-apt-limit-and-uvweb.sh), 21 Nov). **Temporary: remove with `--undo` when the new supply works.** |
 | `docker exec` (healthchecks) | Every 30 s for Pi-hole and NetAlertX | Each one wakes `containerd`, the shim and `dockerd` (19 Nov 07:16, 20 Nov 19:38) |
 | Boot | First 30 minutes | 5 events on 17 Nov: containers starting, Pi-hole loading 24 h of queries |
 
