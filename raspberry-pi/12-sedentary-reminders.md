@@ -26,7 +26,7 @@ All numbers are settings. They start from the optional values in `~/steps/config
 
 ## Web page: http://steps.lan
 
-Shows the sitting timer with the reminder levels, the mode (watching, snoozed, quiet hours, no phone data), Meeting / Nap / Pause buttons, today's steps, reminders, longest sitting and how many times you got up, steps per hour, the last 14 days, and every setting (levels, repeat interval, step threshold and window, quiet hours, snooze lengths, on/off, a test notification).
+Shows the sitting timer with the reminder levels, the mode (watching, snoozed, quiet hours, no phone data), Walking now and snooze buttons, today's steps, reminders, longest sitting and how many times you got up, steps per hour, the last 14 days, and every setting (levels, step threshold and window, quiet hours, snooze lengths and when they are offered, the text, priority and repeat of every notification with a Test button, on/off).
 
 - The page asks for the `STEPS_TOKEN` once and keeps it in the browser. The settings are saved in `~/steps/data/settings.json` and apply at once.
 - Stats are kept for a year in `~/steps/data/stats.json` and written at every phone report (and every 15 minutes).
@@ -68,6 +68,6 @@ Token in `X-Token` or `?t=`. `/steps?steps=N`, `POST /snooze?min=15` (only lengt
 
 ## Limits
 
-- Only the phone is measured: if you leave it on the desk while walking, you get reminders anyway (press Meeting or Nap, or carry it).
+- Only the phone is measured: if you leave it on the desk while walking, you get reminders anyway (press Walking now or a snooze, or carry it).
 - The port is plain HTTP on the LAN, protected by the token only.
 - Undo: `cd ~/steps && docker compose down`.
