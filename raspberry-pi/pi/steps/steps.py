@@ -98,8 +98,10 @@ def read_json(name):
         return None
 
 
-def save_snooze():
-    write_json("state.json", {"snooze_until": S["snooze_until"], "snooze_kind": S["snooze_kind"]})
+def save_state():
+    """Snooze and the time of the last movement, so a restart does not reset the sitting timer."""
+    write_json("state.json", {"snooze_until": S["snooze_until"], "snooze_kind": S["snooze_kind"],
+                              "last_move": S["last_move"]})
 
 
 def save_settings():
@@ -123,6 +125,12 @@ def load():
     saved = read_json("settings.json") or {}
     ok, _ = validate(saved)
     SET.update(ok)
+    lm, t = d.get("last_move"), time.time()
+    # keep the old timer unless it is in the future or older than the "phone silent" limit
+    # (the Pi was off for a long time: do not greet you with constant alarms)
+    if isinstance(lm, (int, float)) and 0 < t - lm <= SET["stale_min"] * 60:
+        S["last_move"] = lm
+        log("sitting timer restored:", round((t - lm) / 60, 1), "min")
     st = read_json("stats.json")
     if isinstance(st, dict):
         stats.update(st)
@@ -230,6 +238,7 @@ def reset(t, why):
     S["last_move"] = t
     S["level_sent"] = 0
     S["last_repeat"] = 0.0
+    save_state()
     log("timer reset:", why)
 
 
@@ -271,7 +280,7 @@ def tick():
                 S["last_move"] = t
                 return
             S["snooze_until"], S["snooze_kind"] = 0.0, ""
-            save_snooze()
+            save_state()
             reset(t, "snooze ended")
             notify("Snooze over, the timer starts now.", 2, "Snooze ended", "alarm_clock", actions=False)
             return
@@ -325,6 +334,7 @@ def loop():
             if n % 180 == 0:          # every 15 minutes
                 with lock:
                     flush_stats()
+                    save_state()
         except Exception as e:
             log("tick error:", e)
         time.sleep(5)
@@ -394,7 +404,7 @@ class H(BaseHTTPRequestHandler):
                 kind = (q.get("kind") or ["meeting"])[0][:10]
                 with lock:
                     S["snooze_until"], S["snooze_kind"] = time.time() + m * 60, kind
-                    save_snooze()
+                    save_state()
                     if kind in ("meeting", "nap"):
                         bump(lambda d: d["snoozes"].__setitem__(kind, d["snoozes"].get(kind, 0) + 1))
                 notify(f"Snoozed {m} min ({kind}).", 1, "Snoozed", "zzz", actions=False)
@@ -402,7 +412,7 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/resume":
                 with lock:
                     S["snooze_until"], S["snooze_kind"] = 0.0, ""
-                    save_snooze()
+                    save_state()
                     reset(time.time(), "snooze cancelled")
                 return self.reply(200, {"ok": True})
             if u.path == "/status":
@@ -432,6 +442,7 @@ class H(BaseHTTPRequestHandler):
 def shutdown(*_):
     with lock:
         flush_stats(True)
+        save_state()
     sys.exit(0)
 
 
