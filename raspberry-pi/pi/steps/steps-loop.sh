@@ -12,10 +12,11 @@ LOG=~/steps-loop.log
 log() { echo "$(date +%H:%M:%S) $*" >> "$LOG"; }
 
 alarm() {
-  # $1 = phrase, $2 = volume in percent of the alarm stream's maximum, $3 = "timer" or "speech"
+  # $1 = phrase, $2 = volume in percent of the alarm stream's maximum, $3 = "timer" or "speech",
+  # $4 = Clock app package for the timer (empty = the phone's choice)
   # (all three come from the Pi). Both kinds ring on the ALARM volume, so they are heard with the
   # ringer silent; only a Do Not Disturb that blocks alarms mutes them.
-  say=${1:-Time to walk}; pct=${2:-50}; mode=${3:-timer}
+  say=${1:-Time to walk}; pct=${2:-50}; mode=${3:-timer}; pk=${4:-}
   mx=$(timeout 10 termux-volume 2>/dev/null | tr -d ' \n' | grep -o '"stream":"alarm","volume":[0-9]*,"max_volume":[0-9]*' | grep -o '[0-9]*$')
   if [ -n "$mx" ]; then
     v=$(( mx * pct / 100 )); [ "$v" -lt 1 ] && v=1
@@ -31,9 +32,14 @@ alarm() {
   else
     # A 1-second timer in the Clock app, labelled with the phrase. Rings like any timer.
     # Needs Termux to have "Display over other apps" (Android blocks starting it from the background).
-    timeout 15 am start -a android.intent.action.SET_TIMER --ei android.intent.extra.alarm.LENGTH 1 \
-      --es android.intent.extra.alarm.MESSAGE "$say" --ez android.intent.extra.alarm.SKIP_UI true >> "$LOG" 2>&1
-    log "timer '$say' requested rc=$? (124 = timed out)"
+    if [ -n "$pk" ]; then
+      timeout 15 am start -p "$pk" -a android.intent.action.SET_TIMER --ei android.intent.extra.alarm.LENGTH 1 \
+        --es android.intent.extra.alarm.MESSAGE "$say" --ez android.intent.extra.alarm.SKIP_UI true >> "$LOG" 2>&1
+    else
+      timeout 15 am start -a android.intent.action.SET_TIMER --ei android.intent.extra.alarm.LENGTH 1 \
+        --es android.intent.extra.alarm.MESSAGE "$say" --ez android.intent.extra.alarm.SKIP_UI true >> "$LOG" 2>&1
+    fi
+    log "timer '$say' requested (app: ${pk:-default}) rc=$? (124 = timed out)"
   fi
 }
 
@@ -51,7 +57,8 @@ while true; do
       say=$(printf '%s' "$reply" | grep -oE '"say": *"[^"]*"' | sed 's/^"say": *"//; s/"$//')
       pct=$(printf '%s' "$reply" | grep -oE '"vol": *[0-9]+' | grep -oE '[0-9]+$')
       mode=$(printf '%s' "$reply" | grep -oE '"mode": *"[a-z]+"' | grep -oE '[a-z]+"$' | tr -d '"')
-      alarm "$say" "$pct" "$mode"
+      pk=$(printf '%s' "$reply" | grep -oE '"pkg": *"[^"]*"' | sed 's/^"pkg": *"//; s/"$//')
+      alarm "$say" "$pct" "$mode" "$pk"
     fi
   else
     log "no step counter value (termux-sensor gave: $out)"

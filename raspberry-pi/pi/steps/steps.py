@@ -69,11 +69,11 @@ NOTIF_DEFAULTS = {
     # Levels 1-4 also have a phone alarm: alarm_mode off | timer (a 1-second Clock-app timer labelled with
     # alarm_text) | speech (text-to-speech); alarm_volume in % of the alarm stream; alarm_repeat_s = at most
     # one alarm per this many seconds. {min} = minutes sitting, {time} = clock time in the label.
-    "level1": {"title": "Stand up", "msg": "Sitting for {min} min. Walk a bit.", "prio": 2, "repeat_s": 0,
+    "level1": {"title": "Stand up", "msg": "Sitting for {min} min. Walk a bit.", "prio": 3, "repeat_s": 0,
                "alarm_mode": "off", "alarm_text": "\U0001F6B6 Stand up, {min} min sitting", "alarm_volume": 20, "alarm_repeat_s": 300},
-    "level2": {"title": "Move now", "msg": "Sitting for {min} min. Walk a bit.", "prio": 3, "repeat_s": 300,
+    "level2": {"title": "Move now", "msg": "Sitting for {min} min. Walk a bit.", "prio": 4, "repeat_s": 300,
                "alarm_mode": "off", "alarm_text": "\U0001F6B6 Walk a bit, {min} min sitting", "alarm_volume": 25, "alarm_repeat_s": 300},
-    "level3": {"title": "MOVE NOW", "msg": "Sitting for {min} min. Get up and walk.", "prio": 4, "repeat_s": 120,
+    "level3": {"title": "MOVE NOW", "msg": "Sitting for {min} min. Get up and walk.", "prio": 5, "repeat_s": 120,
                "alarm_mode": "timer", "alarm_text": "\U0001F6B6 Walk soon: sitting {min} min", "alarm_volume": 25, "alarm_repeat_s": 180},
     "level4": {"title": "MOVE NOW", "msg": "{min} min without moving. Get up!", "prio": 5,
                "repeat_s": int(E("REPEAT_S", "20")),
@@ -97,6 +97,7 @@ DEFAULTS = {
     # snooze buttons: [minutes, offered only while sitting under this many minutes (0 = always)]
     "snooze_opts": [[30, 90], [5, 110], [1, 0]],
     "phone_alarm": True,                # master switch for the phone alarms of the levels
+    "alarm_package": "",                # Clock app that gets the timer request (blank = the phone's choice), e.g. com.google.android.deskclock
     "notif": NOTIF_DEFAULTS,
     "report_idle_s": int(E("REPORT_IDLE_S", "60")),     # how often the phone should report normally
     "report_walk_s": int(E("REPORT_WALK_S", "10")),     # ... while you are walking
@@ -266,6 +267,12 @@ def validate(d):
     num("move_steps", 10, 5000)
     num("move_window_s", 60, 3600)
     num("stale_min", 5, 240)
+    if "alarm_package" in d:
+        pk = str(d["alarm_package"]).strip()
+        if re.fullmatch(r"[A-Za-z0-9._]{0,80}", pk):
+            out["alarm_package"] = pk
+        else:
+            err.append("alarm_package must be an Android package name such as com.google.android.deskclock (or empty)")
     num("report_idle_s", 5, 600)
     num("report_walk_s", 2, 120)
     num("walk_spm", 5, 200)
@@ -675,7 +682,8 @@ class H(BaseHTTPRequestHandler):
                 out = {"ok": True, "next_s": nxt, "alarm": int(bool(due))}
                 if due:
                     cfg = SET["notif"][f"level{due}"]
-                    out.update(level=due, mode=cfg["alarm_mode"], say=alarm_label(due), vol=cfg["alarm_volume"])
+                    out.update(level=due, mode=cfg["alarm_mode"], say=alarm_label(due), vol=cfg["alarm_volume"],
+                               pkg=SET["alarm_package"])
                 return self.reply(200, out)
             if u.path == "/snooze":
                 m = int((q.get("min") or [0])[0])
