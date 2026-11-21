@@ -1,0 +1,21 @@
+# PROPOSAL ONLY - not installed. Install steps are in ../01-undervoltage.md.
+[Unit]
+Description=Record the 60 s before each Raspberry Pi undervoltage event
+After=multi-user.target
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/bin/uv-flight-recorder.py
+# Root is only needed to read /var/lib/docker/containers/*/config.v2.json for
+# container names; everything else is world-readable.
+Nice=10
+MemoryMax=48M
+CPUQuota=10%
+ProtectHome=yes
+ProtectSystem=strict
+LogsDirectory=uv-flight
+NoNewPrivileges=yes
+PrivateTmp=yes
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
