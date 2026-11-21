@@ -1,6 +1,9 @@
 # Encrypted upstream DNS: what it would change
 
-Written 2026-11-20. This is a proposal; nothing is deployed.
+**Status: applied on 2026-11-20 (22:07).** dnsproxy runs from `~/dnsproxy` ([pi/dnsproxy/docker-compose.yml](pi/dnsproxy/docker-compose.yml)) and Pi-hole forwards only to it (`127.0.0.1#5053`). DNS-over-TLS on port 853 works from the Pi (the router blocks it for other devices). Upstreams are the IP forms `tls://1.1.1.1` and `tls://9.9.9.9` in parallel, with `tls://1.0.0.1` as fallback, so no bootstrap lookup is needed. Idle cost: about 8 MB of RAM. Undo: see [CHANGES.md](CHANGES.md). Compare netq's "DNS via Pi-hole" chart and the Pi-hole warnings with the week before.
+
+
+Written 2026-11-20. The recommended setup below is now deployed (see the status note).
 
 **Bottom line:** today Pi-hole sends every lookup it can't answer from cache to Google (8.8.8.8) as plain, unencrypted UDP. Encrypting that one leg hides your household's lookups from Claro and protects the answers from tampering. It may also reduce the bursts of unanswered queries behind the "150 concurrent" warnings. The cost is one more small component in the DNS path. Recommended: a small local forwarder ([dnsproxy](https://github.com/AdguardTeam/dnsproxy)) sending DNS-over-TLS to Cloudflare and Quad9.
 

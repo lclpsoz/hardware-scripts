@@ -1,0 +1,19 @@
+# Encrypted upstream for Pi-hole: plain DNS from Pi-hole on 127.0.0.1:5053,
+# DNS-over-TLS (port 853) to Cloudflare and Quad9. See ../../09-encrypted-dns.md.
+services:
+  dnsproxy:
+    container_name: dnsproxy
+    image: adguard/dnsproxy:latest
+    network_mode: host
+    command:
+      - --listen=127.0.0.1
+      - --port=5053
+      - --upstream=tls://1.1.1.1        # Cloudflare (IP form: no bootstrap lookup needed)
+      - --upstream=tls://9.9.9.9        # Quad9
+      - --fallback=tls://1.0.0.1        # Cloudflare secondary, still encrypted
+      - --upstream-mode=parallel
+      - --timeout=5s
+    read_only: true
+    mem_limit: 64m
+    cpus: "0.5"
+    restart: unless-stopped
