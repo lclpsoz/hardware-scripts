@@ -1,4 +1,4 @@
-# PROPOSAL ONLY - not installed. Install steps are in ../01-undervoltage.md.
+# Installed by scripts/apply-root-changes.sh. See ../01-undervoltage.md.
 [Unit]
 Description=Record the 60 s before each Raspberry Pi undervoltage event
 After=multi-user.target

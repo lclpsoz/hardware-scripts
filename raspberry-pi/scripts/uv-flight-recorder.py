@@ -2,7 +2,7 @@
 """uv-flight-recorder: record what the Pi was doing in the 60 s BEFORE each
 undervoltage event.
 
-PROPOSAL ONLY - not installed. See ../01-undervoltage.md, "Better observability".
+Installed with scripts/apply-root-changes.sh. See ../01-undervoltage.md, "Better observability".
 
 Why: the existing uv-snapshot service runs `top` after the kernel logs the
 event, so it sees the moment after the drop. Short bursts that caused the drop
