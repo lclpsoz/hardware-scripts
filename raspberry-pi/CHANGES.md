@@ -4,6 +4,7 @@ Newest first. Earlier entries come from the Claude Docs written during previous 
 
 | Date | Change | Where | Why | Undo |
 | --- | --- | --- | --- | --- |
+| 2026-11-21 10:18 | Fix: the alerts service skipped the first undervoltage event if `events.jsonl` did not exist yet (missed the 06:11 event) | `~/alerts/alerts.py`, container restarted | Undervoltage alert now fires for the first event | Restore the previous `alerts.py` |
 | 2026-11-21 ~01:20 | Daily backup service on the laptop: hourly systemd user timer, backs up when the last one is over 20 h old, keeps 14, notifies, stamps `~/ops-state/last-backup.json` on the Pi | laptop `~/.config/systemd/user/pi-backup.*`, `~/backups/`; Pi `~/ops-state/` | Scheduled backup ([laptop/README.md](laptop/README.md)) | `bash raspberry-pi/laptop/install.sh --uninstall` |
 | 2026-11-21 ~01:15 | NetAlertX NTFY plugin enabled; notification sections cut to `new_devices` and `down_devices` | `/data/config/app.conf` in the container (backup `app.conf.bak-before-ntfy-2026-11-21`) | New-device alerts on the phone | Restore the backup file; NetAlertX reloads it |
 | 2026-11-21 ~01:10 | `alerts` container: checks services, DNS, netq, undervoltage, flight recorder, backup age, Pi-hole messages, system health, and sends ntfy messages | `~/alerts` (container `alerts`) | Push alerts ([11](11-notifications.md)) | `cd ~/alerts && docker compose down` |
