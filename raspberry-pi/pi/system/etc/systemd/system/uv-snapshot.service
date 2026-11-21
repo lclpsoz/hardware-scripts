@@ -1,0 +1,9 @@
+[Unit]
+Description=Snapshot system state on Pi undervoltage events
+
+[Service]
+ExecStart=/usr/local/bin/uv-snapshot.sh
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,50 @@
+services:
+  netalertx:
+    cpus: "0.5"
+    container_name: netalertx
+    image: jokobsk/netalertx:latest
+    network_mode: host
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - NET_BIND_SERVICE
+      - CHOWN
+      - SETUID
+      - SETGID
+    volumes:
+      - type: volume
+        source: netalertx_data
+        target: /data
+        read_only: false
+      - type: bind
+        source: /etc/localtime
+        target: /etc/localtime
+        read_only: true
+      # Local fix: cache lang() results (upstream re-decodes 24 language files per call).
+      # Source and notes: hardware repo, raspberry-pi/03-netalertx.md
+      - type: bind
+        source: ./lang.php.patched
+        target: /app/front/php/templates/language/lang.php
+        read_only: true
+    tmpfs:
+      - "/tmp:uid=20211,gid=20211,mode=1700,rw,noexec,nosuid,nodev,async,noatime,nodiratime"
+    environment:
+      LISTEN_ADDR: 0.0.0.0
+      PORT: 20211
+      GRAPHQL_PORT: 20212
+    mem_limit: 300m
+    mem_reservation: 150m
+    cpu_shares: 256
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "2"
+    restart: unless-stopped
+
+volumes:
+  netalertx_data:

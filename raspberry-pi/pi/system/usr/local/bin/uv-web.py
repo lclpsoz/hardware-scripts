@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""uv-web: tiny read-only page with the Raspberry Pi undervoltage history.
+
+Reads the kernel log through journalctl on demand (cached for 20 s), so it
+uses no CPU while nobody has the page open. Standard library only.
+"""
+import html
+import json
+import re
+import subprocess
+from datetime import datetime, timedelta
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+PORT = 8099
+DAYS = 7
+SNAP_FILE = "/var/log/uv-events.log"
+CACHE_SECONDS = 20
+LINE = re.compile(
+    r"^(\S+)\s+\S+\s+kernel: hwmon hwmon\d+: (Undervoltage detected!|Voltage normalised)"
+)
+_cache = {"t": 0.0, "page": b"", "json": b""}
+
+
+def get_lines():
+    out = subprocess.run(
+        ["journalctl", "-k", "--since", f"{DAYS} days ago", "-o", "short-iso", "--no-pager"],
+        capture_output=True, text=True, timeout=30,
+    )
+    return out.stdout.splitlines()
+
+
+def parse(lines):
+    """Pair 'detected' with the next 'normalised' -> list of (start, end|None)."""
+    episodes, start = [], None
+    for ln in lines:
+        m = LINE.match(ln)
+        if not m:
+            continue
+        ts = datetime.strptime(m.group(1), "%Y-%m-%dT%H:%M:%S%z")
+        if m.group(2).startswith("Under"):
+            if start is not None:  # no recovery logged (e.g. reboot)
+                episodes.append((start, None))
+            start = ts
+        elif start is not None:
+            episodes.append((start, ts))
+            start = None
+    if start is not None:
+        episodes.append((start, None))
+    return episodes
+
+
+def throttled():
+    try:
+        out = subprocess.run(["vcgencmd", "get_throttled"], capture_output=True,
+                             text=True, timeout=5).stdout.strip()
+        raw = out.split("=")[1]
+        n = int(raw, 16)
+        names = [(0x1, "under-voltage NOW"), (0x4, "throttled NOW"),
+                 (0x10000, "under-voltage since boot"), (0x40000, "throttled since boot")]
+        flags = [t for bit, t in names if n & bit]
+        return raw, ", ".join(flags) or "OK", bool(n & 0x1)
+    except Exception:
+        return "n/a", "vcgencmd not available", False
+
+
+def uptime():
+    try:
+        s = int(float(open("/proc/uptime").read().split()[0]))
+        return f"{s // 86400}d {s % 86400 // 3600}h {s % 3600 // 60}m"
+    except Exception:
+        return "n/a"
+
+
+def snapshots():
+    try:
+        with open(SNAP_FILE, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 6000))
+            return f.read().decode("utf-8", "replace")
+    except Exception:
+        return "(no snapshots yet)"
+
+
+def fmt(ts):
+    return ts.astimezone().strftime("%d %b %H:%M:%S")
+
+
+def build(lines=None, now=None):
+    now = now or datetime.now().astimezone()
+    eps = parse(get_lines() if lines is None else lines)
+
+    def count(hours):
+        return sum(1 for s, _ in eps if now - s <= timedelta(hours=hours))
+
+    bars = []
+    for i in range(23, -1, -1):
+        h0 = (now - timedelta(hours=i)).replace(minute=0, second=0, microsecond=0)
+        n = sum(1 for s, _ in eps if h0 <= s < h0 + timedelta(hours=1))
+        bars.append(f'<div class="b" title="{h0:%d %b %H}h: {n}">'
+                    f'<i style="height:{min(60, 4 * n) + 1}px"></i><span>{h0:%H}</span></div>')
+
+    day_rows = ""
+    for i in range(DAYS):
+        d = (now - timedelta(days=i)).date()
+        n = sum(1 for s, _ in eps if s.astimezone().date() == d)
+        day_rows += f"<tr><td>{d:%a %d %b}</td><td>{n}</td></tr>"
+
+    rows = ""
+    for s, e in reversed(eps[-40:]):
+        dur = f"{int((e - s).total_seconds())} s" if e else "no recovery logged"
+        rows += f"<tr><td>{fmt(s)}</td><td>{fmt(e) if e else '-'}</td><td>{dur}</td></tr>"
+
+    raw, text, under_now = throttled()
+    color = "#e5484d" if under_now else "#30a46c"
+    page = f"""<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="60"><title>Pi voltage</title>
+<style>body{{font:15px system-ui;background:#111;color:#ddd;margin:12px;max-width:640px}}
+h1{{font-size:18px}}h2{{font-size:15px;margin:18px 0 6px;color:#9ab}}
+.c{{background:#1c1c1c;border-radius:8px;padding:10px;margin:8px 0}}
+.s{{border-left:5px solid {color}}}table{{width:100%;border-collapse:collapse}}
+td{{padding:3px 4px;border-bottom:1px solid #2a2a2a}}
+.g{{display:flex;gap:2px;align-items:flex-end;height:80px}}
+.b{{flex:1;text-align:center;font-size:9px}}.b i{{display:block;background:#e5484d;width:100%}}
+pre{{white-space:pre-wrap;font-size:11px;max-height:300px;overflow:auto}}</style></head><body>
+<h1>Raspberry Pi voltage</h1>
+<div class="c s"><b>{html.escape(text)}</b><br>flags {html.escape(raw)} &middot; up {uptime()}
+<br>checked {now:%d %b %H:%M:%S}</div>
+<div class="c">Drops: last hour <b>{count(1)}</b> &middot; 24 h <b>{count(24)}</b>
+&middot; {DAYS} days <b>{len(eps)}</b></div>
+<h2>Drops per hour (last 24 h)</h2><div class="c g">{''.join(bars)}</div>
+<h2>Per day</h2><div class="c"><table>{day_rows}</table></div>
+<h2>Latest drops (newest first)</h2><div class="c"><table>
+<tr><td><b>Detected</b></td><td><b>Normalised</b></td><td><b>Lasted</b></td></tr>{rows}</table></div>
+<h2>Snapshots taken at drop time</h2><div class="c"><pre>{html.escape(snapshots())}</pre></div>
+</body></html>"""
+    data = [{"start": s.isoformat(), "end": e.isoformat() if e else None,
+             "seconds": int((e - s).total_seconds()) if e else None} for s, e in eps]
+    return page.encode(), json.dumps(data).encode()
+
+
+def refresh():
+    import time
+    if time.time() - _cache["t"] > CACHE_SECONDS:
+        _cache["page"], _cache["json"] = build()
+        _cache["t"] = time.time()
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        try:
+            refresh()
+            if self.path in ("/", "/index.html"):
+                body, ctype = _cache["page"], "text/html; charset=utf-8"
+            elif self.path == "/json":
+                body, ctype = _cache["json"], "application/json"
+            else:
+                self.send_error(404)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception as exc:  # keep the service alive
+            self.send_error(500, str(exc)[:100])
+
+    def log_message(self, *args):  # no per-request logging (saves journal writes)
+        pass
+
+
+if __name__ == "__main__":
+    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

@@ -1,0 +1,14 @@
+services:
+  pihole:
+    container_name: pihole
+    image: pihole/pihole:latest
+    network_mode: host
+    environment:
+      TZ: "America/Sao_Paulo"
+      FTLCONF_webserver_api_password: "<redacted>"
+      FTLCONF_dns_listeningMode: "LOCAL"
+      # Web UI moved off port 80 so the .lan proxy (~/proxy) can use it. See hardware repo raspberry-pi/07-services.md
+      FTLCONF_webserver_port: "8080o,8443os,[::]:8080o,[::]:8443os"
+    volumes:
+      - ./etc-pihole:/etc/pihole
+    restart: unless-stopped
