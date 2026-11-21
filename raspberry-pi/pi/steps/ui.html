@@ -197,14 +197,8 @@
       </div>
       <h2 style="margin-top:22px">Notifications</h2>
       <p class="hint">Text, priority and repeat of each notification. You can use <code>{min}</code> (minutes sitting), <code>{snooze}</code>, <code>{steps}</code> and <code>{stale}</code>. Priority 1–2 is silent, 3 plays the app's default sound, 4 adds vibration, 5 is the loudest. Each level can have its own sound in Android's settings for the ntfy app. <b>Test</b> sends the <i>saved</i> version, so press Save first.</p>
-      <label class="check" style="margin:8px 0"><input type="checkbox" id="s_phone_alarm"> Phone alarm at level 4 (the phone loop speaks the phrase below on the alarm volume)</label>
-      <div class="orow">
-        <label class="f">Alarm type<select id="s_alarm_mode"><option value="timer">Clock timer (rings like a timer)</option><option value="speech">Spoken phrase (text-to-speech)</option></select></label>
-        <label class="f">Timer label / phrase<input type="text" id="s_alarm_text" maxlength="60" style="width:22em;max-width:100%"></label>
-        <label class="f">Alarm volume (% of max)<input type="number" id="s_alarm_volume" min="10" max="100"></label>
-        <label class="f">At most once every (s)<input type="number" id="s_alarm_repeat_s" min="10" max="3600"></label>
-      </div>
-      <p class="hint">The timer type asks the phone's Clock app for a 1-second timer, which then rings on the alarm volume until dismissed, so it is sent at most once per interval above. It needs "Display over other apps" for Termux in Android settings. The label can have emojis and <code>{min}</code> (minutes sitting) and <code>{time}</code> (clock time); speech drops the emojis.</p>
+      <label class="check" style="margin:8px 0"><input type="checkbox" id="s_phone_alarm"> Phone alarms on (master switch; each level has its own alarm below)</label>
+      <p class="hint">A level's phone alarm is a 1-second timer in the phone's Clock app (or a spoken phrase) that rings on the alarm volume. Give a lower volume and a longer interval to the earlier levels so the last level is clearly the most intense. The timer needs "Display over other apps" for Termux in Android settings; labels can have emojis and <code>{min}</code> (minutes sitting) and <code>{time}</code>. <b>Test</b> on a level also triggers its alarm, at the phone's next report.</p>
       <div id="notifs"></div>
       <div class="row" style="margin-top:16px">
         <button class="primary" id="save">Save</button>
@@ -228,8 +222,6 @@
         <button id="dbgSitGo">Set sitting time</button>
       </div>
       <p class="hint">Pretends you have been sitting this long. Reminders fire at the usual levels (for example 55 sends the light one within seconds, 80 starts the constant one).</p>
-      <div class="row" style="margin-top:14px"><button id="dbgAlarmGo">Play the phone alarm once</button></div>
-      <p class="hint">Uses the saved type, phrase and volume. It plays at the phone's next report (the phone is asked to report every few seconds for a minute, so expect up to about 10 s; with a 60 s interval it can take up to a minute to start).</p>
       <div id="dbgMsg" class="hint"></div>
     </details>
   </div>
@@ -280,6 +272,14 @@ function buildForms() {
     PRIOS.forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o); });
     f.appendChild(field('Priority', sel));
     if (isLevel) f.appendChild(field('Repeat every (s, 0 = once)', inp('number', 'n_' + key + '_repeat', { min: 0, max: 3600 })));
+    if (isLevel) {
+      const am = document.createElement('select'); am.id = 'n_' + key + '_alarm_mode';
+      [['off', 'Phone alarm: off'], ['timer', 'Phone alarm: Clock timer'], ['speech', 'Phone alarm: spoken']].forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; am.appendChild(o); });
+      f.appendChild(field('Phone alarm', am));
+      f.appendChild(field('Alarm volume (% of max)', inp('number', 'n_' + key + '_alarm_volume', { min: 10, max: 100 })));
+      f.appendChild(field('Alarm at most every (s)', inp('number', 'n_' + key + '_alarm_repeat', { min: 10, max: 3600 })));
+      f.appendChild(field('Timer label / phrase', inp('text', 'n_' + key + '_alarm_text', { maxlength: 60 }), 'wide'));
+    }
     const b = document.createElement('button'); b.textContent = 'Test'; b.onclick = () => testNotif(key, name);
     f.appendChild(b); row.appendChild(f); box.appendChild(row);
   });
@@ -289,21 +289,28 @@ function fillForm(s) {
   s.levels_min.forEach((v, i) => $('l' + i).value = v);
   $('s_move_steps').value = s.move_steps;
   $('s_move_window_min').value = Math.round(s.move_window_s / 60); $('s_stale_min').value = s.stale_min;
-  $('s_phone_alarm').checked = s.phone_alarm; $('s_alarm_text').value = s.alarm_text; $('s_alarm_mode').value = s.alarm_mode; $('s_alarm_repeat_s').value = s.alarm_repeat_s; $('s_alarm_volume').value = s.alarm_volume;
+  $('s_phone_alarm').checked = s.phone_alarm;
   for (let i = 0; i < 4; i++) { const o = s.snooze_opts[i]; $('o' + i + 'm').value = o ? o[0] : ''; $('o' + i + 'b').value = o ? o[1] : ''; }
   $('s_report_idle_s').value = s.report_idle_s; $('s_report_walk_s').value = s.report_walk_s; $('s_walk_spm').value = s.walk_spm;
   $('s_quiet_enabled').checked = s.quiet_enabled; $('s_quiet_start').value = s.quiet_start; $('s_quiet_end').value = s.quiet_end;
   NOTIF_META.forEach(([key, , isLevel]) => {
     const n = s.notif[key];
     $('n_' + key + '_title').value = n.title; $('n_' + key + '_msg').value = n.msg; $('n_' + key + '_prio').value = n.prio;
-    if (isLevel) $('n_' + key + '_repeat').value = n.repeat_s;
+    if (isLevel) {
+      $('n_' + key + '_repeat').value = n.repeat_s;
+      $('n_' + key + '_alarm_mode').value = n.alarm_mode; $('n_' + key + '_alarm_volume').value = n.alarm_volume;
+      $('n_' + key + '_alarm_repeat').value = n.alarm_repeat_s; $('n_' + key + '_alarm_text').value = n.alarm_text;
+    }
   });
 }
 function readForm() {
   const notif = {};
   NOTIF_META.forEach(([key, , isLevel]) => {
     notif[key] = { title: $('n_' + key + '_title').value, msg: $('n_' + key + '_msg').value, prio: Number($('n_' + key + '_prio').value) };
-    if (isLevel) notif[key].repeat_s = Number($('n_' + key + '_repeat').value);
+    if (isLevel) Object.assign(notif[key], {
+      repeat_s: Number($('n_' + key + '_repeat').value), alarm_mode: $('n_' + key + '_alarm_mode').value,
+      alarm_volume: Number($('n_' + key + '_alarm_volume').value), alarm_repeat_s: Number($('n_' + key + '_alarm_repeat').value),
+      alarm_text: $('n_' + key + '_alarm_text').value });
   });
   const opts = [];
   for (let i = 0; i < 4; i++) if ($('o' + i + 'm').value !== '') opts.push([Number($('o' + i + 'm').value), Number($('o' + i + 'b').value || 0)]);
@@ -312,14 +319,17 @@ function readForm() {
     levels_min: [0, 1, 2, 3].map(i => Number($('l' + i).value)),
     move_steps: Number($('s_move_steps').value),
     move_window_s: Number($('s_move_window_min').value) * 60, stale_min: Number($('s_stale_min').value),
-    phone_alarm: $('s_phone_alarm').checked, alarm_text: $('s_alarm_text').value, alarm_mode: $('s_alarm_mode').value, alarm_repeat_s: Number($('s_alarm_repeat_s').value), alarm_volume: Number($('s_alarm_volume').value), snooze_opts: opts,
+    phone_alarm: $('s_phone_alarm').checked, snooze_opts: opts,
     report_idle_s: Number($('s_report_idle_s').value), report_walk_s: Number($('s_report_walk_s').value), walk_spm: Number($('s_walk_spm').value),
     quiet_enabled: $('s_quiet_enabled').checked, quiet_start: $('s_quiet_start').value, quiet_end: $('s_quiet_end').value,
     notif
   };
 }
 async function testNotif(key, name) {
-  try { await api('/api/test', { method: 'POST', body: JSON.stringify({ type: key }) }); msg('Sent a test of "' + name + '" with the saved settings. Check the phone.', 'ok'); }
+  try {
+    const j = await api('/api/test', { method: 'POST', body: JSON.stringify({ type: key }) });
+    msg('Sent a test of "' + name + '" with the saved settings.' + (j.alarm ? ' Its phone alarm plays at the phone\'s next report (about 10 s).' : '') + ' Check the phone.', 'ok');
+  }
   catch (e) { msg(e.message, 'err'); }
 }
 
@@ -528,7 +538,6 @@ async function debugCall(path, body) {
   catch (e) { m.textContent = e.message; m.className = 'hint'; m.style.color = 'var(--bad)'; }
 }
 $('dbgStepsGo').onclick = () => debugCall('/api/debug/steps', { n: Number($('dbgSteps').value) });
-$('dbgAlarmGo').onclick = () => debugCall('/api/debug/alarm', {});
 $('dbgSitGo').onclick = () => debugCall('/api/debug/sitting', { min: Number($('dbgSit').value) });
 
 buildForms();

@@ -26,7 +26,7 @@ Endpoints (token in header X-Token or ?t=):
   POST /api/test              {"type": "level2"|"moved"|...} send that notification
   POST /api/debug/steps       {"n": N} fake report with the counter raised by N (hollow dot)
   POST /api/debug/sitting     {"min": M} pretend you have been sitting M minutes
-  POST /api/debug/alarm       play the phone alarm once, at the next report
+  POST /api/debug/alarm       {"level": 3} play that level's phone alarm once, at the next report
   GET  /health                no token
 """
 import copy
@@ -66,11 +66,18 @@ QS, QE = _quiet_default()
 # {stale} = phone-silent limit, {steps} = steps counted. Priorities: 1 min, 2 low (silent),
 # 3 default, 4 high, 5 max. repeat_s (levels only): 0 = send once, else repeat while the level lasts.
 NOTIF_DEFAULTS = {
-    "level1": {"title": "Stand up", "msg": "Sitting for {min} min. Walk a bit.", "prio": 2, "repeat_s": 0},
-    "level2": {"title": "Move now", "msg": "Sitting for {min} min. Walk a bit.", "prio": 3, "repeat_s": 300},
-    "level3": {"title": "MOVE NOW", "msg": "Sitting for {min} min. Get up and walk.", "prio": 4, "repeat_s": 120},
+    # Levels 1-4 also have a phone alarm: alarm_mode off | timer (a 1-second Clock-app timer labelled with
+    # alarm_text) | speech (text-to-speech); alarm_volume in % of the alarm stream; alarm_repeat_s = at most
+    # one alarm per this many seconds. {min} = minutes sitting, {time} = clock time in the label.
+    "level1": {"title": "Stand up", "msg": "Sitting for {min} min. Walk a bit.", "prio": 2, "repeat_s": 0,
+               "alarm_mode": "off", "alarm_text": "\U0001F6B6 Stand up, {min} min sitting", "alarm_volume": 20, "alarm_repeat_s": 300},
+    "level2": {"title": "Move now", "msg": "Sitting for {min} min. Walk a bit.", "prio": 3, "repeat_s": 300,
+               "alarm_mode": "off", "alarm_text": "\U0001F6B6 Walk a bit, {min} min sitting", "alarm_volume": 25, "alarm_repeat_s": 300},
+    "level3": {"title": "MOVE NOW", "msg": "Sitting for {min} min. Get up and walk.", "prio": 4, "repeat_s": 120,
+               "alarm_mode": "timer", "alarm_text": "\U0001F6B6 Walk soon: sitting {min} min", "alarm_volume": 25, "alarm_repeat_s": 180},
     "level4": {"title": "MOVE NOW", "msg": "{min} min without moving. Get up!", "prio": 5,
-               "repeat_s": int(E("REPEAT_S", "20"))},
+               "repeat_s": int(E("REPEAT_S", "20")),
+               "alarm_mode": "timer", "alarm_text": "\U0001F6B6 Time to walk! Sitting {min} min", "alarm_volume": 50, "alarm_repeat_s": 60},
     "moved": {"title": "Good", "msg": "Moved enough, timer reset.", "prio": 1},
     "snoozed": {"title": "Snoozed", "msg": "Snoozed {snooze} min. The sitting timer is paused.", "prio": 1},
     "snooze_end": {"title": "Snooze ended", "msg": "Snooze over, the sitting timer continues at {min} min.", "prio": 2},
@@ -89,11 +96,7 @@ DEFAULTS = {
     "quiet_end": QE,
     # snooze buttons: [minutes, offered only while sitting under this many minutes (0 = always)]
     "snooze_opts": [[30, 90], [5, 110], [1, 0]],
-    "phone_alarm": True,                # at the last level the phone loop plays a loud alarm
-    "alarm_mode": "timer",              # "timer": a 1-second Clock-app timer labelled with the phrase; "speech": text-to-speech
-    "alarm_text": "\U0001F6B6 Time to walk! Sitting {min} min",   # timer label / spoken phrase; {min}, {time}
-    "alarm_repeat_s": 60,               # at most one phone alarm per this many seconds
-    "alarm_volume": 50,                 # alarm volume, percent of the phone's maximum
+    "phone_alarm": True,                # master switch for the phone alarms of the levels
     "notif": NOTIF_DEFAULTS,
     "report_idle_s": int(E("REPORT_IDLE_S", "60")),     # how often the phone should report normally
     "report_walk_s": int(E("REPORT_WALK_S", "10")),     # ... while you are walking
@@ -103,7 +106,7 @@ WALK_HOLD_S = 60      # keep reporting fast this long after the last walking see
 SET = copy.deepcopy(DEFAULTS)
 
 lock = threading.Lock()
-S = {"last_move": time.time(), "snooze_start": 0.0, "snooze_until": 0.0, "snooze_kind": "", "last_sample": 0.0, "walk_until": 0.0, "stats_flush": 0.0, "alarm_test": False, "last_alarm": 0.0,
+S = {"last_move": time.time(), "snooze_start": 0.0, "snooze_until": 0.0, "snooze_kind": "", "last_sample": 0.0, "walk_until": 0.0, "stats_flush": 0.0, "alarm_test": 0, "last_alarm": 0.0, "last_alarm_level": 0,
      "stale_told": False, "level_sent": 0, "last_repeat": 0.0, "steps": None, "started": time.time()}
 samples = deque()
 stats = {}            # "YYYY-MM-DD" -> day record
@@ -263,20 +266,6 @@ def validate(d):
     num("move_steps", 10, 5000)
     num("move_window_s", 60, 3600)
     num("stale_min", 5, 240)
-    num("alarm_volume", 10, 100)
-    num("alarm_repeat_s", 10, 3600)
-    if "alarm_mode" in d:
-        if d["alarm_mode"] in ("timer", "speech"):
-            out["alarm_mode"] = d["alarm_mode"]
-        else:
-            err.append("alarm_mode must be timer or speech")
-    if "alarm_text" in d:
-        txt = str(d["alarm_text"]).strip()
-        # emojis allowed; no quotes, backslashes or control characters (the phone script passes it on)
-        if 1 <= len(txt) <= 60 and not re.search(r'["\\`]|[\x00-\x1f]', txt):
-            out["alarm_text"] = txt
-        else:
-            err.append('alarm_text must be 1-60 characters without quotes, backslashes or line breaks')
     num("report_idle_s", 5, 600)
     num("report_walk_s", 2, 120)
     num("walk_spm", 5, 200)
@@ -317,6 +306,23 @@ def validate(d):
                     if not 1 <= p <= 5:
                         raise ValueError(f"{typ} priority must be 1-5")
                     base[typ]["prio"] = p
+                if "alarm_mode" in base[typ]:
+                    if "alarm_mode" in v:
+                        if v["alarm_mode"] not in ("off", "timer", "speech"):
+                            raise ValueError(f"{typ} alarm type must be off, timer or speech")
+                        base[typ]["alarm_mode"] = v["alarm_mode"]
+                    if "alarm_text" in v:
+                        txt = str(v["alarm_text"]).strip()
+                        # emojis allowed; no quotes, backslashes or control characters (the phone script passes it on)
+                        if not (1 <= len(txt) <= 60) or re.search(r'["\\`]|[\x00-\x1f]', txt):
+                            raise ValueError(f"{typ} alarm label must be 1-60 characters without quotes, backslashes or line breaks")
+                        base[typ]["alarm_text"] = txt
+                    for k, lo, hi in (("alarm_volume", 10, 100), ("alarm_repeat_s", 10, 3600)):
+                        if k in v:
+                            x = int(v[k])
+                            if not lo <= x <= hi:
+                                raise ValueError(f"{typ} {k} must be {lo}-{hi}")
+                            base[typ][k] = x
                 if "repeat_s" in v and "repeat_s" in base[typ]:
                     r = int(v["repeat_s"])
                     if not 0 <= r <= 3600:
@@ -397,22 +403,44 @@ def send(typ, **ctx):
     notify(msg, n["prio"], title, TAGS.get(typ, "walking"), mins if typ.startswith("level") else None)
 
 
-def alarm_label():
-    """The timer label / spoken phrase with {min} and {time} filled in. Emojis are dropped for speech."""
+def alarm_label(lvl):
+    """The timer label / spoken phrase of this level with {min} and {time} filled in. Emojis are dropped for speech."""
+    cfg = SET["notif"][f"level{lvl}"]
     ctx = _Fmt(min=int(sitting_min()), time=time.strftime("%H:%M"))
     try:
-        txt = SET["alarm_text"].format_map(ctx)
+        txt = cfg["alarm_text"].format_map(ctx)
     except (ValueError, IndexError, AttributeError):
-        txt = SET["alarm_text"]
-    if SET["alarm_mode"] == "speech":
+        txt = cfg["alarm_text"]
+    if cfg["alarm_mode"] == "speech":
         txt = re.sub(r"[^\w .,!?'\-:]", "", txt).strip() or "Time to walk"
     return txt
 
 
+def alarm_levels():
+    """Numbers (1-4) of the levels that have a phone alarm."""
+    return [i for i in range(1, 5) if SET["notif"][f"level{i}"]["alarm_mode"] != "off"]
+
+
 def alarm_active(t):
-    """True while the phone loop should play its loud alarm (last level, nothing snoozed)."""
+    """True while the current level has a phone alarm and nothing pauses it."""
     snoozed = S["snooze_until"] and t < S["snooze_until"]
-    return bool(SET["phone_alarm"] and SET["enabled"] and S["level_sent"] >= 4 and not snoozed and not in_quiet(t))
+    lvl = S["level_sent"]
+    return bool(SET["phone_alarm"] and SET["enabled"] and lvl >= 1 and not snoozed and not in_quiet(t)
+                and SET["notif"][f"level{lvl}"]["alarm_mode"] != "off")
+
+
+def alarm_due(now):
+    """Which level's alarm the phone should play on this report (0 = none). Called once per report.
+    A new level sounds at once; the same level repeats after its alarm_repeat_s."""
+    test, S["alarm_test"] = S["alarm_test"], 0              # a Test button or debug call plays once
+    if test:
+        return test
+    if alarm_active(now):
+        lvl = S["level_sent"]
+        if lvl != S["last_alarm_level"] or now - S["last_alarm"] >= SET["notif"][f"level{lvl}"]["alarm_repeat_s"]:
+            S["last_alarm"], S["last_alarm_level"] = now, lvl
+            return lvl
+    return 0
 
 
 def begin_snooze(minutes, kind, t):
@@ -444,6 +472,7 @@ def reset(t, why):
     S["last_move"] = t
     S["level_sent"] = 0
     S["last_repeat"] = 0.0
+    S["last_alarm_level"] = 0
     save_state()
     log("timer reset:", why)
 
@@ -493,10 +522,11 @@ def add_sample(n, manual=False):
 def next_report_s(t):
     n = SET["report_walk_s"] if t < S["walk_until"] else SET["report_idle_s"]
     snoozed = S["snooze_until"] and t < S["snooze_until"]
-    # near the last level the alarm needs fresh reports: it can only sound when the phone reports
-    if (SET["phone_alarm"] and SET["enabled"] and not snoozed and not in_quiet(t)
-            and (S["level_sent"] >= 3 or sitting_min(t) >= SET["levels_min"][3] - 2)):
-        n = min(n, SET["notif"]["level4"]["repeat_s"] or 20)
+    first = (alarm_levels() or [0])[0]
+    # the alarm can only sound when the phone reports: ask for fresh reports from 2 min before the first alarm level
+    if (first and SET["phone_alarm"] and SET["enabled"] and not snoozed and not in_quiet(t)
+            and (S["level_sent"] >= first - 1 or sitting_min(t) >= SET["levels_min"][first - 1] - 2)):
+        n = min(n, 20)
     return n
 
 
@@ -640,14 +670,12 @@ class H(BaseHTTPRequestHandler):
                     if time.time() - S["stats_flush"] >= 60:      # at most once a minute
                         flush_stats()
                     now = time.time()
-                    test, S["alarm_test"] = S["alarm_test"], False     # the debug test plays once
-                    due = test or (alarm_active(now) and now - S["last_alarm"] >= SET["alarm_repeat_s"])
-                    if due:
-                        S["last_alarm"] = now
-                    nxt = min(nxt, next_report_s(now))            # fast reports as the last level nears
-                out = {"ok": True, "next_s": nxt, "alarm": int(due)}
+                    due = alarm_due(now)
+                    nxt = min(nxt, next_report_s(now))            # fast reports as the alarm levels near
+                out = {"ok": True, "next_s": nxt, "alarm": int(bool(due))}
                 if due:
-                    out.update(mode=SET["alarm_mode"], say=alarm_label(), vol=SET["alarm_volume"])
+                    cfg = SET["notif"][f"level{due}"]
+                    out.update(level=due, mode=cfg["alarm_mode"], say=alarm_label(due), vol=cfg["alarm_volume"])
                 return self.reply(200, out)
             if u.path == "/snooze":
                 m = int((q.get("min") or [0])[0])
@@ -712,18 +740,26 @@ class H(BaseHTTPRequestHandler):
                 log("debug: sitting timer set to", m, "min")
                 return self.reply(200, {"ok": True})
             if u.path == "/api/debug/alarm" and self.command == "POST":
+                lvl = int(self.body_json().get("level", 4))
+                if lvl not in alarm_levels():
+                    return self.reply(400, {"errors": [f"level {lvl} has its phone alarm off"]})
                 with lock:
-                    S["alarm_test"] = True
+                    S["alarm_test"] = lvl
                     S["walk_until"] = time.time() + 60    # fast reports so it plays soon
-                log("debug: phone alarm will play at the next report")
+                log("debug: phone alarm of level", lvl, "will play at the next report")
                 return self.reply(200, {"ok": True})
             if u.path == "/api/test" and self.command == "POST":
                 typ = str(self.body_json().get("type", ""))
                 if typ not in SET["notif"]:
                     return self.reply(400, {"errors": ["unknown notification type"]})
+                alarm = False
                 with lock:
                     send(typ, snooze=5)
-                return self.reply(200, {"ok": True})
+                    if typ.startswith("level") and SET["phone_alarm"] and int(typ[5:]) in alarm_levels():
+                        S["alarm_test"] = int(typ[5:])             # the phone plays this level's alarm too
+                        S["walk_until"] = time.time() + 60         # fast reports so it plays soon
+                        alarm = True
+                return self.reply(200, {"ok": True, "alarm": alarm})
         except (KeyError, ValueError, IndexError):
             return self.reply(400, {"error": "bad request"})
         self.reply(404, {"error": "not found"})
