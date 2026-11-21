@@ -5,7 +5,8 @@ The phone posts its cumulative step counter to /steps. If fewer than move_steps
 steps happen within move_window_s seconds, the "sitting" timer keeps running.
 Escalation (minutes sitting): level 1 light (ntfy prio 3), 2 mid (4), 3 high (5),
 4 constant (prio 5 every repeat_s seconds) until you walk.
-Snooze (meeting / nap) PAUSES the sitting timer; it carries on from where it was when the snooze ends.
+Snooze (1/5/15/30 min, long ones only while you have not sat too long) and "Walking now" PAUSE the
+sitting timer; it carries on from where it was when the snooze ends.
 
 Settings (editable in the web page, saved to /data/settings.json) start from the
 environment variables below. Daily stats are kept in /data/stats.json (30 days),
@@ -15,18 +16,20 @@ Endpoints (token in header X-Token or ?t=):
   GET  /  or /ui              web page (no token; it asks for the token itself)
   GET  /steps?steps=N         phone reports its cumulative step counter; the reply says
                               {"next_s": seconds to wait} (normal or walking interval)
-  POST /snooze?min=60&kind=meeting   (kind: meeting|nap)
+  POST /snooze?min=15         pause for one of the snooze lengths offered right now
+  POST /walking               "I'm walking now": pause a few minutes and report fast
   GET  /resume                cancel the snooze
   GET  /status                small JSON state
   GET  /api/state             everything the page shows
   GET  /api/samples?hours=1   phone reports (time, counter) of the last 1-24 h, thinned to ~900 points
   GET  /phone.sh              the Termux loop script (no token)
   POST /api/settings          JSON body with any settings, validated
-  POST /api/test              send a test notification
+  POST /api/test              {"type": "level2"|"moved"|...} send that notification
   POST /api/debug/steps       {"n": N} fake report with the counter raised by N (hollow dot)
   POST /api/debug/sitting     {"min": M} pretend you have been sitting M minutes
   GET  /health                no token
 """
+import copy
 import hmac
 import json
 import os
@@ -58,24 +61,43 @@ def _quiet_default():
 
 
 QS, QE = _quiet_default()
+# Every notification the service can send. {min} = minutes sitting, {snooze} = snooze minutes,
+# {stale} = phone-silent limit, {steps} = steps counted. Priorities: 1 min, 2 low (silent),
+# 3 default, 4 high, 5 max. repeat_s (levels only): 0 = send once, else repeat while the level lasts.
+NOTIF_DEFAULTS = {
+    "level1": {"title": "Stand up", "msg": "Sitting for {min} min. Walk a bit.", "prio": 2, "repeat_s": 0},
+    "level2": {"title": "Move now", "msg": "Sitting for {min} min. Walk a bit.", "prio": 3, "repeat_s": 300},
+    "level3": {"title": "MOVE NOW", "msg": "Sitting for {min} min. Get up and walk.", "prio": 4, "repeat_s": 120},
+    "level4": {"title": "MOVE NOW", "msg": "{min} min without moving. Get up!", "prio": 5,
+               "repeat_s": int(E("REPEAT_S", "20"))},
+    "moved": {"title": "Good", "msg": "Moved enough, timer reset.", "prio": 1},
+    "snoozed": {"title": "Snoozed", "msg": "Snoozed {snooze} min. The sitting timer is paused.", "prio": 1},
+    "walking": {"title": "Walking", "msg": "Walking now: reminders paused {snooze} min and the phone reports more often.", "prio": 1},
+    "snooze_end": {"title": "Snooze ended", "msg": "Snooze over, the sitting timer continues at {min} min.", "prio": 2},
+    "silent": {"title": "Steps: phone silent", "msg": "No step data from the phone for {stale} min; reminders paused.", "prio": 2},
+}
+TAGS = {"level1": "walking", "level2": "warning", "level3": "rotating_light", "level4": "rotating_light",
+        "moved": "tada", "snoozed": "zzz", "walking": "walking", "snooze_end": "alarm_clock", "silent": "warning"}
 DEFAULTS = {
     "enabled": True,
     "levels_min": [float(x) for x in E("LEVELS_MIN", "50,60,70,80").split(",")],
-    "repeat_s": int(E("REPEAT_S", "20")),
     "move_steps": int(E("MOVE_STEPS", "200")),
     "move_window_s": int(E("MOVE_WINDOW_S", "300")),
     "stale_min": int(E("STALE_S", "1800")) // 60,
     "quiet_enabled": True,
     "quiet_start": QS,
     "quiet_end": QE,
-    "meeting_min": int(E("MEETING_MIN", "60")),
-    "nap_min": int(E("NAP_MIN", "30")),
+    # snooze buttons: [minutes, offered only while sitting under this many minutes (0 = always)]
+    "snooze_opts": [[30, 90], [15, 105], [5, 110], [1, 0]],
+    "walking_snooze_min": 5,            # the "Walking now" button: pause this long and report fast
+    "phone_alarm": True,                # at the last level the phone loop plays a loud alarm
+    "notif": NOTIF_DEFAULTS,
     "report_idle_s": int(E("REPORT_IDLE_S", "60")),     # how often the phone should report normally
     "report_walk_s": int(E("REPORT_WALK_S", "10")),     # ... while you are walking
     "walk_spm": int(E("WALK_SPM", "20")),               # steps per minute that count as walking
 }
 WALK_HOLD_S = 60      # keep reporting fast this long after the last walking seen
-SET = dict(DEFAULTS)
+SET = copy.deepcopy(DEFAULTS)
 
 lock = threading.Lock()
 S = {"last_move": time.time(), "snooze_start": 0.0, "snooze_until": 0.0, "snooze_kind": "", "last_sample": 0.0, "walk_until": 0.0, "stats_flush": 0.0,
@@ -232,15 +254,13 @@ def validate(d):
             except ValueError:
                 err.append(f"{key} must look like 07:30")
 
-    for key in ("enabled", "quiet_enabled"):
+    for key in ("enabled", "quiet_enabled", "phone_alarm"):
         if key in d:
             out[key] = bool(d[key])
-    num("repeat_s", 5, 600)
     num("move_steps", 10, 5000)
     num("move_window_s", 60, 3600)
     num("stale_min", 5, 240)
-    num("meeting_min", 1, 600)
-    num("nap_min", 1, 600)
+    num("walking_snooze_min", 1, 60)
     num("report_idle_s", 5, 600)
     num("report_walk_s", 2, 120)
     num("walk_spm", 5, 200)
@@ -254,6 +274,41 @@ def validate(d):
             out["levels_min"] = lv
         except (TypeError, ValueError):
             err.append("levels_min needs 4 increasing minutes, each between 1 and 600")
+    if "snooze_opts" in d:
+        try:
+            ops = [[int(m), int(b)] for m, b in d["snooze_opts"]]
+            if not 1 <= len(ops) <= 6 or any(not 1 <= m <= 600 or not 0 <= b <= 1000 for m, b in ops):
+                raise ValueError
+            out["snooze_opts"] = ops
+        except (TypeError, ValueError):
+            err.append("snooze_opts needs 1-6 pairs: minutes 1-600 and a sitting limit 0-1000 (0 = no limit)")
+    if "notif" in d:
+        base = copy.deepcopy(SET["notif"])
+        try:
+            if not isinstance(d["notif"], dict):
+                raise ValueError("notif must be an object")
+            for typ, v in d["notif"].items():
+                if typ not in base or not isinstance(v, dict):
+                    raise ValueError(f"unknown notification {typ}")
+                for k, lo, hi in (("title", 1, 60), ("msg", 1, 200)):
+                    if k in v:
+                        txt = str(v[k]).strip()
+                        if not lo <= len(txt) <= hi:
+                            raise ValueError(f"{typ} {k} must be {lo}-{hi} characters")
+                        base[typ][k] = txt
+                if "prio" in v:
+                    p = int(v["prio"])
+                    if not 1 <= p <= 5:
+                        raise ValueError(f"{typ} priority must be 1-5")
+                    base[typ]["prio"] = p
+                if "repeat_s" in v and "repeat_s" in base[typ]:
+                    r = int(v["repeat_s"])
+                    if not 0 <= r <= 3600:
+                        raise ValueError(f"{typ} repeat must be 0-3600 s (0 = once)")
+                    base[typ]["repeat_s"] = r
+            out["notif"] = base
+        except (TypeError, ValueError) as e:
+            err.append(str(e))
     return out, err
 
 
@@ -273,22 +328,76 @@ def bump(fn):
 
 
 # ---------- notifications ----------
-def notify(msg, prio=3, title="Move!", tags="walking", actions=True):
+def sitting_min(t=None):
+    """Minutes sitting; frozen while a snooze pauses the timer."""
+    t = t or time.time()
+    snoozed = S["snooze_until"] and t < S["snooze_until"] and S["snooze_start"]
+    return ((S["snooze_start"] if snoozed else t) - S["last_move"]) / 60
+
+
+def avail_snoozes(mins):
+    """Snooze lengths offered at this sitting time, longest first: long snoozes disappear as you sit longer."""
+    return sorted({m for m, below in SET["snooze_opts"] if not below or mins < below}, reverse=True)
+
+
+def action_buttons(mins):
+    """ntfy allows 3 buttons: 'Walking now' plus the two longest snoozes available right now."""
+    def mk(label, path):
+        return f"http, {label}, {PUBLIC}{path}, method=POST, headers.X-Token={TOKEN}, clear=true"
+    a = [mk("Walking now", "/walking")]
+    for m in avail_snoozes(mins)[:2]:
+        a.append(mk(f"{m} min", f"/snooze?min={m}"))
+    return "; ".join(a)
+
+
+def notify(msg, prio=3, title="Move!", tags="walking", mins=None):
+    """Send to ntfy. mins is given for reminders: they get the buttons."""
     if not TOPIC:
-        log("NO TOPIC, would send:", prio, msg)
+        log("NO TOPIC, would send:", prio, title, "|", msg)
         return
     h = {"Priority": str(prio), "Title": title, "Tags": tags}
-    if actions:
-        a = []
-        for label, mins, kind in (("Meeting", SET["meeting_min"], "meeting"), ("Nap", SET["nap_min"], "nap")):
-            a.append(f"http, {label} {mins}m, {PUBLIC}/snooze?min={mins}&kind={kind}, "
-                     f"method=POST, headers.X-Token={TOKEN}, clear=true")
-        h["Actions"] = "; ".join(a)
+    if mins is not None:
+        h["Actions"] = action_buttons(mins)
     try:
         req = urllib.request.Request(f"{NTFY_URL}/{TOPIC}", data=msg.encode(), headers=h, method="POST")
         urllib.request.urlopen(req, timeout=5).read()
     except Exception as e:  # ntfy down: log and carry on
         log("ntfy failed:", e)
+
+
+class _Fmt(dict):
+    def __missing__(self, k):
+        return "{" + k + "}"
+
+
+def send(typ, **ctx):
+    """Send the notification of this type with the texts and priority from the settings."""
+    n = SET["notif"][typ]
+    mins = sitting_min()
+    ctx.setdefault("min", int(mins))
+    ctx.setdefault("snooze", SET["walking_snooze_min"])
+    ctx.setdefault("stale", SET["stale_min"])
+    ctx.setdefault("steps", S["steps"] or 0)
+    try:
+        msg, title = n["msg"].format_map(_Fmt(ctx)), n["title"].format_map(_Fmt(ctx))
+    except (ValueError, IndexError, AttributeError):
+        msg, title = n["msg"], n["title"]
+    notify(msg, n["prio"], title, TAGS.get(typ, "walking"), mins if typ.startswith("level") else None)
+
+
+def alarm_active(t):
+    """True while the phone loop should play its loud alarm (last level, nothing snoozed)."""
+    snoozed = S["snooze_until"] and t < S["snooze_until"]
+    return bool(SET["phone_alarm"] and SET["enabled"] and S["level_sent"] >= 4 and not snoozed and not in_quiet(t))
+
+
+def begin_snooze(minutes, kind, t):
+    """Start (or replace) a snooze. It pauses the sitting timer; extending keeps the original start."""
+    if not (S["snooze_until"] and t < S["snooze_until"]):
+        S["snooze_start"] = t
+    S["snooze_until"], S["snooze_kind"] = t + minutes * 60, kind
+    save_state()
+    bump(lambda d: d["snoozes"].__setitem__(kind, d["snoozes"].get(kind, 0) + 1))
 
 
 def in_quiet(t):
@@ -349,8 +458,10 @@ def add_sample(n, manual=False):
             reset(t, "phone back after a gap")
         elif n - first >= SET["move_steps"]:
             if S["level_sent"] >= 1:
-                notify("Moving again, timer reset.", 1, "Good", "tada", actions=False)
+                send("moved", steps=n - first)
             bump(lambda d: d.__setitem__("moves", d["moves"] + 1))
+            if S["snooze_kind"] == "walking":        # you did walk: the "walking now" pause is no longer needed
+                end_snooze(t)
             reset(t, f"{n - first} steps in {int(t - samples[0][0])}s")
             samples.clear()
             samples.append((t, n))
@@ -378,7 +489,7 @@ def tick():
                 return                       # paused: the timer neither runs nor resets
             end_snooze(S["snooze_until"])
             log("snooze ended, timer continues at", round((t - S["last_move"]) / 60, 1), "min")
-            notify("Snooze over, the sitting timer continues.", 2, "Snooze ended", "alarm_clock", actions=False)
+            send("snooze_end")
             return
         if not SET["enabled"] or in_quiet(t):
             S["last_move"] = t
@@ -389,8 +500,7 @@ def tick():
             S["level_sent"] = 0
             if not S["stale_told"]:
                 S["stale_told"] = True
-                notify(f"No step data from the phone for {SET['stale_min']} min; reminders paused.", 2,
-                       "Steps: phone silent", "warning", actions=False)
+                send("silent")
             return
         mins = (t - S["last_move"]) / 60
         if mins > day(t)["longest_min"]:
@@ -405,20 +515,15 @@ def tick():
                 break
         if not lvl:
             return
-        if lvl < 4:
-            if lvl > S["level_sent"]:
-                S["level_sent"] = lvl
-                bump(lambda d: d["reminders"].__setitem__(lvl - 1, d["reminders"][lvl - 1] + 1))
-                notify(f"Sitting for {int(mins)} min. Walk a bit.", (3, 4, 5)[lvl - 1],
-                       ("Stand up", "Move now", "MOVE NOW")[lvl - 1],
-                       ("walking", "warning", "rotating_light")[lvl - 1])
-        else:
-            if S["level_sent"] < 4:
-                bump(lambda d: d["reminders"].__setitem__(3, d["reminders"][3] + 1))
-            S["level_sent"] = 4
-            if t - S["last_repeat"] >= SET["repeat_s"]:
-                S["last_repeat"] = t
-                notify(f"{int(mins)} min without moving. Get up!", 5, "MOVE NOW", "rotating_light")
+        cfg = SET["notif"][f"level{lvl}"]
+        if lvl > S["level_sent"]:                    # first time this level is reached
+            S["level_sent"] = lvl
+            S["last_repeat"] = t
+            bump(lambda d: d["reminders"].__setitem__(lvl - 1, d["reminders"][lvl - 1] + 1))
+            send(f"level{lvl}", min=int(mins))
+        elif cfg["repeat_s"] and t - S["last_repeat"] >= cfg["repeat_s"]:
+            S["last_repeat"] = t
+            send(f"level{lvl}", min=int(mins))
 
 
 def loop():
@@ -443,11 +548,12 @@ def state(t):
     snoozed = bool(S["snooze_until"] and t < S["snooze_until"])
     mode = ("off" if not SET["enabled"] else "snoozed" if snoozed else "quiet" if quiet
             else "no-data" if stale or not S["last_sample"] else "watching")
+    mins = sitting_min(t)
     return {
-        "mode": mode,
-        "sitting_min": round(((S["snooze_start"] if snoozed and S["snooze_start"] else t) - S["last_move"]) / 60, 1), "level": S["level_sent"],
+        "mode": mode, "sitting_min": round(mins, 1), "level": S["level_sent"],
         "steps": S["steps"], "last_sample_age_s": round(t - S["last_sample"]) if S["last_sample"] else None,
         "snooze_left_min": round(max(0, S["snooze_until"] - t) / 60, 1), "snooze_kind": S["snooze_kind"],
+        "snooze_available": avail_snoozes(mins), "alarm": alarm_active(t),
         "quiet_now": quiet, "uptime_min": round((t - S["started"]) / 60),
         "walking": t < S["walk_until"], "report_every_s": next_report_s(t)}
 
@@ -505,20 +611,30 @@ class H(BaseHTTPRequestHandler):
                 with lock:
                     if time.time() - S["stats_flush"] >= 60:      # at most once a minute
                         flush_stats()
-                return self.reply(200, {"ok": True, "next_s": nxt})
+                    alarm = alarm_active(time.time())
+                    rep = SET["notif"]["level4"]["repeat_s"]
+                    if alarm and rep:
+                        nxt = min(nxt, rep)                       # ask for reports as often as the alarm repeats
+                return self.reply(200, {"ok": True, "next_s": nxt, "alarm": int(alarm)})
             if u.path == "/snooze":
-                m = max(1, min(600, int((q.get("min") or [SET["meeting_min"]])[0])))
-                kind = (q.get("kind") or ["meeting"])[0][:10]
+                m = int((q.get("min") or [0])[0])
                 with lock:
                     now = time.time()
-                    if not (S["snooze_until"] and now < S["snooze_until"]):
-                        S["snooze_start"] = now          # a new snooze pauses the timer; extending one keeps its start
-                    S["snooze_until"], S["snooze_kind"] = now + m * 60, kind
-                    save_state()
-                    if kind in ("meeting", "nap"):
-                        bump(lambda d: d["snoozes"].__setitem__(kind, d["snoozes"].get(kind, 0) + 1))
-                notify(f"Snoozed {m} min ({kind}).", 1, "Snoozed", "zzz", actions=False)
-                return self.reply(200, {"snoozed_min": m, "kind": kind})
+                    ok = avail_snoozes(sitting_min(now))
+                    if m not in ok:
+                        return self.reply(400, {"error": f"{m} min is not available at this sitting time",
+                                                "available": ok})
+                    begin_snooze(m, "snooze", now)
+                    send("snoozed", snooze=m)
+                return self.reply(200, {"snoozed_min": m})
+            if u.path == "/walking":
+                with lock:
+                    now = time.time()
+                    m = SET["walking_snooze_min"]
+                    begin_snooze(m, "walking", now)
+                    S["walk_until"] = now + m * 60          # the phone reports at the fast interval meanwhile
+                    send("walking", snooze=m)
+                return self.reply(200, {"walking_min": m})
             if u.path == "/resume":
                 with lock:
                     if S["snooze_until"]:
@@ -571,7 +687,11 @@ class H(BaseHTTPRequestHandler):
                 log("debug: sitting timer set to", m, "min")
                 return self.reply(200, {"ok": True})
             if u.path == "/api/test" and self.command == "POST":
-                notify("Test notification. Try the Meeting and Nap buttons.", 3, "Steps test", "test_tube")
+                typ = str(self.body_json().get("type", ""))
+                if typ not in SET["notif"]:
+                    return self.reply(400, {"errors": ["unknown notification type"]})
+                with lock:
+                    send(typ, snooze=SET["walking_snooze_min"] if typ == "walking" else 5)
                 return self.reply(200, {"ok": True})
         except (KeyError, ValueError, IndexError):
             return self.reply(400, {"error": "bad request"})

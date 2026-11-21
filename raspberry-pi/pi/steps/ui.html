@@ -74,6 +74,14 @@
   .seg button.on { background: var(--accent); color: #fff; }
   .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--muted); margin-top: 6px; }
   .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  select { font: inherit; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); max-width: 100%; }
+  .nrow { border-top: 1px solid var(--line); padding: 12px 0 4px; margin-top: 6px; }
+  .nform { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px 14px; align-items: end; margin-top: 6px; }
+  .nform .wide { grid-column: span 2; }
+  .nform input[type=text] { width: 100%; }
+  .nform input[type=number] { width: 100%; }
+  .orow { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; margin-top: 6px; }
+  @media (max-width: 560px) { .nform .wide { grid-column: span 1; } }
   .hidden { display: none; }
   .scroll { overflow-x: auto; }
   td.bt, th.bt { width: 30%; }
@@ -168,13 +176,13 @@
         <label class="f">Constant<input type="number" id="l3" min="1" step="1"></label>
       </div>
       <div class="form" style="margin-top:14px">
-        <label class="f">Repeat when constant (s)<input type="number" id="s_repeat_s" min="5" max="600"></label>
         <label class="f">Steps that count as moving<input type="number" id="s_move_steps" min="10" max="5000"></label>
         <label class="f">…within (minutes)<input type="number" id="s_move_window_min" min="1" max="60"></label>
         <label class="f">Phone silent after (min)<input type="number" id="s_stale_min" min="5" max="240"></label>
-        <label class="f">Meeting snooze (min)<input type="number" id="s_meeting_min" min="1" max="600"></label>
-        <label class="f">Nap snooze (min)<input type="number" id="s_nap_min" min="1" max="600"></label>
+        <label class="f">"Walking now" pause (min)<input type="number" id="s_walking_snooze_min" min="1" max="60"></label>
       </div>
+      <p class="hint" style="margin-top:14px">Snooze buttons: minutes, and the sitting time under which each is offered (0 = always). A notification has room for 3 buttons: "Walking now" plus the two longest snoozes offered at that moment. This page shows all of them.</p>
+      <div id="snzOpts"></div>
       <p class="hint" style="margin-top:14px">How often the phone sends its step count (the phone loop follows these, no change needed there):</p>
       <div class="form">
         <label class="f">Normally, every (s)<input type="number" id="s_report_idle_s" min="5" max="600"></label>
@@ -188,14 +196,17 @@
         <input type="text" id="s_quiet_end" maxlength="5" placeholder="07:00" inputmode="numeric" style="width:5em">
         <span class="hint">24-hour, Pi time (UTC-3)</span>
       </div>
+      <h2 style="margin-top:22px">Notifications</h2>
+      <p class="hint">Text, priority and repeat of each notification. You can use <code>{min}</code> (minutes sitting), <code>{snooze}</code>, <code>{steps}</code> and <code>{stale}</code>. Priority 1–2 is silent, 3 plays the app's default sound, 4 adds vibration, 5 is the loudest. Each level can have its own sound in Android's settings for the ntfy app. <b>Test</b> sends the <i>saved</i> version, so press Save first.</p>
+      <label class="check" style="margin:8px 0"><input type="checkbox" id="s_phone_alarm"> Phone alarm at level 4 (the phone loop speaks "Get up and walk now" on the alarm volume, needs the updated loop script)</label>
+      <div id="notifs"></div>
       <div class="row" style="margin-top:16px">
         <button class="primary" id="save">Save</button>
         <button id="defaults">Load defaults</button>
-        <button id="test">Send test notification</button>
         <button id="tokClear">Forget token</button>
       </div>
       <div id="msg"></div>
-      <p class="hint">Settings apply at once and survive restarts. Changing the buttons' minutes affects the next notification. The Meeting and Nap buttons also appear on every reminder.</p>
+      <p class="hint">Settings apply at once and survive restarts.</p>
     </div>
 
     <details class="card" style="margin-top:28px">
@@ -235,25 +246,73 @@ function showLogin() {
 function fmtAge(s) { return s == null ? '–' : s < 90 ? s + ' s ago' : Math.round(s / 60) + ' min ago'; }
 const MODES = { watching: 'watching', snoozed: 'snoozed', quiet: 'quiet hours', 'no-data': 'no phone data', off: 'reminders off' };
 
+const NOTIF_META = [
+  ['level1', 'Level 1 · light', true], ['level2', 'Level 2 · mid', true], ['level3', 'Level 3 · high', true], ['level4', 'Level 4 · constant', true],
+  ['moved', 'Moved enough (timer reset)', false], ['snoozed', 'Snoozed (confirmation)', false], ['walking', '"Walking now" (confirmation)', false],
+  ['snooze_end', 'Snooze ended', false], ['silent', 'Phone silent', false]];
+const PRIOS = [[1, '1 · min (hidden)'], [2, '2 · low (silent)'], [3, '3 · default (sound)'], [4, '4 · high (+ vibration)'], [5, '5 · max (loudest)']];
+function field(label, input, cls) { const l = document.createElement('label'); l.className = 'f' + (cls ? ' ' + cls : ''); l.appendChild(document.createTextNode(label)); l.appendChild(input); return l; }
+function inp(type, id, attrs) { const i = document.createElement('input'); i.type = type; i.id = id; Object.entries(attrs || {}).forEach(([k, v]) => i.setAttribute(k, v)); return i; }
+function buildForms() {
+  const so = $('snzOpts');
+  for (let i = 0; i < 4; i++) {
+    const r = document.createElement('div'); r.className = 'orow';
+    r.appendChild(field('Snooze (min)', inp('number', 'o' + i + 'm', { min: 1, max: 600 })));
+    r.appendChild(field('Offered while sitting under (min, 0 = always)', inp('number', 'o' + i + 'b', { min: 0, max: 1000 })));
+    so.appendChild(r);
+  }
+  const box = $('notifs');
+  NOTIF_META.forEach(([key, name, isLevel]) => {
+    const row = document.createElement('div'); row.className = 'nrow';
+    const h = document.createElement('b'); h.textContent = name; row.appendChild(h);
+    const f = document.createElement('div'); f.className = 'nform';
+    f.appendChild(field('Title', inp('text', 'n_' + key + '_title', { maxlength: 60 }), 'wide'));
+    f.appendChild(field('Message', inp('text', 'n_' + key + '_msg', { maxlength: 200 }), 'wide'));
+    const sel = document.createElement('select'); sel.id = 'n_' + key + '_prio';
+    PRIOS.forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o); });
+    f.appendChild(field('Priority', sel));
+    if (isLevel) f.appendChild(field('Repeat every (s, 0 = once)', inp('number', 'n_' + key + '_repeat', { min: 0, max: 3600 })));
+    const b = document.createElement('button'); b.textContent = 'Test'; b.onclick = () => testNotif(key, name);
+    f.appendChild(b); row.appendChild(f); box.appendChild(row);
+  });
+}
 function fillForm(s) {
   $('s_enabled').checked = s.enabled;
   s.levels_min.forEach((v, i) => $('l' + i).value = v);
-  $('s_repeat_s').value = s.repeat_s; $('s_move_steps').value = s.move_steps;
+  $('s_move_steps').value = s.move_steps;
   $('s_move_window_min').value = Math.round(s.move_window_s / 60); $('s_stale_min').value = s.stale_min;
-  $('s_meeting_min').value = s.meeting_min; $('s_nap_min').value = s.nap_min;
+  $('s_walking_snooze_min').value = s.walking_snooze_min; $('s_phone_alarm').checked = s.phone_alarm;
+  for (let i = 0; i < 4; i++) { const o = s.snooze_opts[i]; $('o' + i + 'm').value = o ? o[0] : ''; $('o' + i + 'b').value = o ? o[1] : ''; }
   $('s_report_idle_s').value = s.report_idle_s; $('s_report_walk_s').value = s.report_walk_s; $('s_walk_spm').value = s.walk_spm;
   $('s_quiet_enabled').checked = s.quiet_enabled; $('s_quiet_start').value = s.quiet_start; $('s_quiet_end').value = s.quiet_end;
+  NOTIF_META.forEach(([key, , isLevel]) => {
+    const n = s.notif[key];
+    $('n_' + key + '_title').value = n.title; $('n_' + key + '_msg').value = n.msg; $('n_' + key + '_prio').value = n.prio;
+    if (isLevel) $('n_' + key + '_repeat').value = n.repeat_s;
+  });
 }
 function readForm() {
+  const notif = {};
+  NOTIF_META.forEach(([key, , isLevel]) => {
+    notif[key] = { title: $('n_' + key + '_title').value, msg: $('n_' + key + '_msg').value, prio: Number($('n_' + key + '_prio').value) };
+    if (isLevel) notif[key].repeat_s = Number($('n_' + key + '_repeat').value);
+  });
+  const opts = [];
+  for (let i = 0; i < 4; i++) if ($('o' + i + 'm').value !== '') opts.push([Number($('o' + i + 'm').value), Number($('o' + i + 'b').value || 0)]);
   return {
     enabled: $('s_enabled').checked,
     levels_min: [0, 1, 2, 3].map(i => Number($('l' + i).value)),
-    repeat_s: Number($('s_repeat_s').value), move_steps: Number($('s_move_steps').value),
+    move_steps: Number($('s_move_steps').value),
     move_window_s: Number($('s_move_window_min').value) * 60, stale_min: Number($('s_stale_min').value),
-    meeting_min: Number($('s_meeting_min').value), nap_min: Number($('s_nap_min').value),
+    walking_snooze_min: Number($('s_walking_snooze_min').value), phone_alarm: $('s_phone_alarm').checked, snooze_opts: opts,
     report_idle_s: Number($('s_report_idle_s').value), report_walk_s: Number($('s_report_walk_s').value), walk_spm: Number($('s_walk_spm').value),
-    quiet_enabled: $('s_quiet_enabled').checked, quiet_start: $('s_quiet_start').value, quiet_end: $('s_quiet_end').value
+    quiet_enabled: $('s_quiet_enabled').checked, quiet_start: $('s_quiet_start').value, quiet_end: $('s_quiet_end').value,
+    notif
   };
+}
+async function testNotif(key, name) {
+  try { await api('/api/test', { method: 'POST', body: JSON.stringify({ type: key }) }); msg('Sent a test of "' + name + '" with the saved settings. Check the phone.', 'ok'); }
+  catch (e) { msg(e.message, 'err'); }
 }
 
 function render(d) {
@@ -278,17 +337,16 @@ function render(d) {
 
   const snz = $('snz'); snz.textContent = '';
   const add = (label, fn, cls) => { const b = document.createElement('button'); b.textContent = label; if (cls) b.className = cls; b.onclick = fn; snz.appendChild(b); };
-  add('Meeting ' + s.meeting_min + ' min', () => snooze(s.meeting_min, 'meeting'));
-  add('Nap ' + s.nap_min + ' min', () => snooze(s.nap_min, 'nap'));
-  add('Pause 2 h', () => snooze(120, 'meeting'));
+  add('Walking now (' + s.walking_snooze_min + ' min)', async () => { try { await api('/walking', { method: 'POST' }); refresh(); } catch (e) { msg(e.message, 'err'); } });
+  st.snooze_available.slice().sort((a, b) => a - b).forEach(m => add('Snooze ' + m + ' min', () => snooze(m)));
   if (st.mode === 'snoozed') add('Resume now', async () => { await api('/resume'); refresh(); }, 'primary');
-  $('snzNote').textContent = st.mode === 'snoozed' ? 'Paused (' + st.snooze_kind + '), ' + Math.ceil(st.snooze_left_min) + ' min left. The sitting timer is paused and carries on afterwards.' : '';
+  $('snzNote').textContent = st.mode === 'snoozed' ? (st.snooze_kind === 'walking' ? 'Walking now: paused, ' : 'Snoozed, ') + Math.ceil(st.snooze_left_min) + ' min left. The sitting timer is paused and carries on afterwards.' : '';
 
   $('tSteps').textContent = t.steps.toLocaleString();
   const r = t.reminders; $('tRem').textContent = r[0] + r[1] + r[2] + r[3];
   $('tRemN').textContent = r[0] + ' light · ' + r[1] + ' mid · ' + r[2] + ' high · ' + r[3] + ' constant';
   $('tLong').textContent = Math.round(t.longest_min) + ' min';
-  $('tMoves').textContent = t.moves; $('tSnz').textContent = t.snoozes.meeting + ' meeting · ' + t.snoozes.nap + ' nap snoozes';
+  $('tMoves').textContent = t.moves; $('tSnz').textContent = Object.values(t.snoozes).reduce((a, b) => a + b, 0) + ' snoozes (incl. walking now)';
   $('repNow').textContent = 'Right now the phone is asked to report every ' + st.report_every_s + ' s' + (st.walking ? ' (walking detected).' : '.') + ' The change reaches the phone after its next report.';
   $('tAge').textContent = fmtAge(st.last_sample_age_s); $('tCount').textContent = st.steps == null ? '' : 'counter ' + st.steps.toLocaleString();
 
@@ -308,7 +366,7 @@ function render(d) {
     const tr = document.createElement('tr'), c = (txt, cls) => { const td = document.createElement('td'); if (cls) td.className = cls; td.textContent = txt; tr.appendChild(td); return td; };
     c(x.date.slice(5)); c(x.steps.toLocaleString(), 'n');
     const bt = c('', 'bt'); const bar = document.createElement('div'); bar.className = 'mini'; bar.style.width = (x.steps / hmax * 100) + '%'; bt.appendChild(bar);
-    c(x.reminders.reduce((a, b) => a + b, 0), 'n'); c(Math.round(x.longest_min) + ' min', 'n'); c(x.snoozes.meeting + x.snoozes.nap, 'n');
+    c(x.reminders.reduce((a, b) => a + b, 0), 'n'); c(Math.round(x.longest_min) + ' min', 'n'); c(Object.values(x.snoozes).reduce((a, b) => a + b, 0), 'n');
     body.appendChild(tr);
   });
 }
@@ -437,8 +495,8 @@ document.querySelectorAll('#rng button').forEach(b => b.onclick = () => {
   loadSamples();
 });
 
-async function snooze(min, kind) {
-  try { await api('/snooze?min=' + min + '&kind=' + kind, { method: 'POST' }); refresh(); } catch (e) { msg(e.message, 'err'); }
+async function snooze(min) {
+  try { await api('/snooze?min=' + min, { method: 'POST' }); refresh(); } catch (e) { msg(e.message, 'err'); }
 }
 async function refresh() {
   try { render(await api('/api/state')); await loadSamples(); } catch (e) { if (e.message !== 'token') msg('Cannot reach the service: ' + e.message, 'err'); }
@@ -450,13 +508,12 @@ function start() {
 
 $('tokOk').onclick = () => { token = $('tok').value.trim(); try { localStorage.setItem('stepsToken', token); } catch (e) {} start(); };
 $('tokClear').onclick = () => { try { localStorage.removeItem('stepsToken'); } catch (e) {} token = ''; showLogin(); };
-document.querySelectorAll('#app input').forEach(i => { if (i.closest('.card') && i.id.match(/^(s_|l\d)/)) i.addEventListener('input', () => formDirty = true); });
+$('app').addEventListener('input', e => { if (/^(s_|l\d|n_|o\d)/.test(e.target.id)) formDirty = true; });
 $('save').onclick = async () => {
   try { await api('/api/settings', { method: 'POST', body: JSON.stringify(readForm()) }); formDirty = false; msg('Saved.', 'ok'); refresh(); }
   catch (e) { msg(e.message, 'err'); }
 };
 $('defaults').onclick = () => { if (defaults) { fillForm(defaults); formDirty = true; msg('Defaults loaded; press Save to apply.'); } };
-$('test').onclick = async () => { try { await api('/api/test', { method: 'POST' }); msg('Test sent. Check the phone.', 'ok'); } catch (e) { msg(e.message, 'err'); } };
 
 async function debugCall(path, body) {
   const m = $('dbgMsg');
@@ -466,6 +523,7 @@ async function debugCall(path, body) {
 $('dbgStepsGo').onclick = () => debugCall('/api/debug/steps', { n: Number($('dbgSteps').value) });
 $('dbgSitGo').onclick = () => debugCall('/api/debug/sitting', { min: Number($('dbgSit').value) });
 
+buildForms();
 if (token) start(); else showLogin();
 </script>
 </body>

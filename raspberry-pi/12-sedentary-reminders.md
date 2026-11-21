@@ -6,11 +6,23 @@ A small container, `steps`, nags you through ntfy when your phone's step counter
 
 - The phone sends its cumulative step counter to `http://192.168.0.250:8097/steps` from a loop in Termux ([pi/steps/steps-loop.sh](pi/steps/steps-loop.sh)). **The Pi answers each report with `next_s`, how long to wait**: 60 s normally and 10 s while you walk (20 steps per minute or more, kept for 60 s after the last walking). Both intervals and the walking threshold are settings on the web page; the loop never needs editing.
 - "Moved" means at least 200 steps within 5 minutes. That resets the sitting timer.
-- Escalation by minutes sitting: **50** light (ntfy priority 3), **60** mid (4), **70** high (5), **80+** constant (priority 5 every 20 s) until you walk.
-- Every reminder has two buttons: **Meeting 60m** and **Nap 30m**. Both PAUSE the sitting timer: it is frozen during the snooze and carries on from the same value afterwards (it is not reset). Real walking during a snooze still resets it.
+- Escalation by minutes sitting, with a rising sound (all of it editable on the page, defaults below):
+
+  | Level | Sitting | ntfy priority | Sound | Repeats |
+  | --- | --- | --- | --- | --- |
+  | 1 | 50 min | 2 (low) | none, only in the notification tray | once |
+  | 2 | 60 min | 3 (default) | the app's default sound | every 5 min |
+  | 3 | 70 min | 4 (high) | sound and vibration | every 2 min |
+  | 4 | 80 min and up | 5 (max) | loudest; plus the phone alarm below | every 20 s |
+
+  Android lets you give each priority its own sound (Settings → Apps → ntfy → Notifications): soft for 3, a clear two-tone for 4, the alarm tone for 5, with Do Not Disturb override on 5.
+- **Phone alarm** (level 4, switch on the page): the Pi's reply to each phone report says `"alarm": 1` while level 4 is active and nothing is snoozed. The Termux loop then sets the alarm volume to maximum, vibrates and speaks "Get up and walk now" on the alarm stream (`termux-volume`, `termux-vibrate`, `termux-tts-speak -s ALARM`). During level 4 the phone is asked to report as often as the level repeats (20 s). Not verified on the owner's phone yet.
+- **Buttons.** ntfy allows 3 buttons per notification, so a reminder has **Walking now** plus the two longest snoozes offered at that moment. Snoozes are 30, 15, 5 and 1 min, but the long ones go away as you sit longer: 30 min only below 90 min of sitting, 15 min below 105, 5 min below 110, and 1 min always (settings). The page shows all that are currently offered, and the Pi refuses a snooze that is not offered. Every snooze PAUSES the sitting timer: it is frozen and carries on from the same value afterwards (it is not reset). Real walking during a snooze still resets it.
+- **Walking now** pauses reminders for 5 minutes (setting) and marks you as walking, so the phone reports at the fast interval. If you really move enough meanwhile, the timer resets and the pause ends.
+- **Notifications.** Each type has its own title, message, priority and (for levels) repeat interval on the page, with a **Test** button: the four levels, "Moved enough, timer reset", snoozed, walking now, snooze ended and phone silent. Texts can use `{min}`, `{snooze}`, `{steps}` and `{stale}`. "Moved enough" is sent when you walk enough while a reminder was active.
 - No reminders from 22:00 to 07:00 (America/Sao_Paulo), and none while the phone has been silent for 30 min (you get one low-priority notice).
 
-All numbers are settings. They start from the optional values in `~/steps/config.env` (`LEVELS_MIN`, `REPEAT_S`, `MOVE_STEPS`, `QUIET_HOURS`, `MEETING_MIN`, `NAP_MIN`) and are changed in the web page below, which wins once saved.
+All numbers are settings. They start from the optional values in `~/steps/config.env` (`LEVELS_MIN`, `REPEAT_S` for level 4, `MOVE_STEPS`, `QUIET_HOURS`) and are changed in the web page below, which wins once saved.
 
 ## Web page: http://steps.lan
 
@@ -36,7 +48,7 @@ Shows the sitting timer with the reminder levels, the mode (watching, snoozed, q
 
 ## Endpoints
 
-Token in `X-Token` or `?t=`. `/steps?steps=N`, `/snooze?min=60&kind=meeting|nap`, `/resume`, `/status`, `/api/state`, `POST /api/settings`, `POST /api/test`, `POST /api/debug/steps` and `POST /api/debug/sitting` (JSON `{"n": N}` and `{"min": M}`); `/`, `/health` and `/phone.sh` need no token.
+Token in `X-Token` or `?t=`. `/steps?steps=N`, `POST /snooze?min=15` (only lengths offered right now), `POST /walking`, `/resume`, `/status`, `/api/state`, `POST /api/settings`, `POST /api/test` (JSON `{"type": "level2"}`), `POST /api/debug/steps` and `POST /api/debug/sitting` (JSON `{"n": N}` and `{"min": M}`); `/`, `/health` and `/phone.sh` need no token.
 
 ## Phone setup
 
