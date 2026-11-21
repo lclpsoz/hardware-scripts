@@ -51,7 +51,9 @@ PORT = int(env("NETQ_PORT", "8098"))
 DB_PATH = env("NETQ_DB", "/data/netq.db")
 INTERVAL = int(env("NETQ_INTERVAL", "60"))
 PING_TARGETS = pairs(env("NETQ_PING", "router=192.168.0.1,isp=100.66.64.1,cloudflare=1.1.1.1,google=8.8.8.8"))
-DNS_TARGETS = pairs(env("NETQ_DNS", "pihole=127.0.0.1,cloudflare=1.1.1.1,google=8.8.8.8"))
+# host or host:port. "pihole" asks a popular name (cached); every other target asks a new random name.
+# pihole_new: the same Pi-hole with a new name; forwarder: dnsproxy (encrypted upstream) on 127.0.0.1:5053.
+DNS_TARGETS = pairs(env("NETQ_DNS", "pihole=127.0.0.1,pihole_new=127.0.0.1,forwarder=127.0.0.1:5053,cloudflare=1.1.1.1,google=8.8.8.8"))
 PIHOLE_NAME = env("NETQ_PIHOLE_NAME", "www.google.com")
 HTTPS_HOST = env("NETQ_HTTPS_HOST", "1.1.1.1")
 HTTPS_EVERY = int(env("NETQ_HTTPS_EVERY", "300"))
@@ -65,7 +67,8 @@ FLUSH_EVERY = int(env("NETQ_FLUSH_EVERY", "300"))
 UA = "netq/1.0 (home network quality logger)"
 
 LABELS = {"router": "Router", "isp": "ISP gateway", "cloudflare": "Cloudflare",
-          "google": "Google", "pihole": "Pi-hole"}
+          "google": "Google", "pihole": "Pi-hole (cached name)", "pihole_new": "Pi-hole (new name)",
+          "forwarder": "Encrypted forwarder"}
 RANGES = {"6h": (6 * 3600, 60, 900), "24h": (86400, 300, 3600),
           "7d": (7 * 86400, 1800, 6 * 3600), "30d": (30 * 86400, 7200, 86400)}
 STOP = threading.Event()
@@ -130,7 +133,9 @@ def ping(host, count=5, gap=0.2, timeout=1.0):
 
 
 def dns_query(server, name, timeout=2.0):
-    """One A query over UDP. Returns (answered, ms, rcode)."""
+    """One A query over UDP to "host" or "host:port". Returns (answered, ms, rcode)."""
+    host, _, port = server.partition(":")
+    port = int(port) if port else 53
     tid = random.randint(0, 0xFFFF)
     qname = b"".join(bytes([len(p)]) + p.encode() for p in name.strip(".").split(".")) + b"\0"
     query = struct.pack("!HHHHHH", tid, 0x0100, 1, 0, 0, 0) + qname + struct.pack("!HH", 1, 1)
@@ -138,7 +143,7 @@ def dns_query(server, name, timeout=2.0):
     sock.settimeout(timeout)
     start = time.monotonic()
     try:
-        sock.sendto(query, (server, 53))
+        sock.sendto(query, (host, port))
         while True:
             data, _ = sock.recvfrom(4096)
             if len(data) >= 4 and data[:2] == query[:2]:
@@ -429,7 +434,7 @@ def summary():
         status, text = "critical", "Router not answering"
     elif internet and min(internet) >= 0.8:
         status, text = "critical", "Internet down"
-    elif (internet and max(internet) >= 0.1) or (dns.get("pihole", {}).get("fail_pct") or 0) >= 10:
+    elif (internet and max(internet) >= 0.1) or max((dns.get(k, {}).get("fail_pct") or 0) for k in ("pihole", "pihole_new", "forwarder")) >= 10:
         status, text = "serious", "Packet loss or DNS failures"
     elif (internet and max(internet) > 0) or (lat.get("cloudflare") or 0) > 100:
         status, text = "warning", "Some loss or high latency"
@@ -502,14 +507,14 @@ PAGE = r"""<!doctype html>
 :root { color-scheme: light;
   --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
   --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,0.10);
-  --isp: #2a78d6; --router: #eb6834; --cloudflare: #1baf7a; --google: #eda100; --pihole: #6250d6;
+  --isp: #2a78d6; --router: #eb6834; --cloudflare: #1baf7a; --google: #eda100; --pihole: #6250d6; --pnew: #eb6834; --fwd: #2a78d6;
   --down: #e87ba4; --up: #008300;
   --l1: #86b6ef; --l2: #5598e7; --l3: #2a78d6; --l4: #1c5cab; --l5: #104281;
   --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b; }
 @media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) { color-scheme: dark;
   --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
   --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
-  --isp: #3987e5; --router: #d95926; --cloudflare: #199e70; --google: #c98500; --pihole: #9085e9;
+  --isp: #3987e5; --router: #d95926; --cloudflare: #199e70; --google: #c98500; --pihole: #9085e9; --pnew: #d95926; --fwd: #3987e5;
   --down: #d55181; --up: #0ca30c;
   --l1: #184f95; --l2: #256abf; --l3: #3987e5; --l4: #6da7ec; --l5: #b7d3f6; } }
 * { box-sizing: border-box; }
@@ -565,7 +570,7 @@ th:first-child, td:first-child, th.txt, td.txt { text-align: left; } th { color:
   <div id="inc"></div></div>
 <ul class="note">
   <li><b>Router</b> is the LAN hop. <b>ISP gateway</b> is the first hop inside the ISP's network. <b>Cloudflare</b> and <b>Google</b> are the far end.</li>
-  <li>DNS through <b>Pi-hole</b> asks for a popular name (usually cached). DNS to Cloudflare and Google asks for a new random name each time, so it measures a full lookup.</li>
+  <li>DNS through <b>Pi-hole</b> asks for a popular name (usually cached). Every other DNS probe asks for a new random name, so it measures a full lookup: through Pi-hole, through the <b>encrypted forwarder</b> (dnsproxy, DNS-over-TLS to Cloudflare and Quad9, in use since 20 Nov 2026 22:07), and straight to Cloudflare and Google over plain UDP as a control.</li>
   <li>Charts show the average of each period's per-minute medians; hover or use the arrow keys for values, or open the table under each chart.</li>
 </ul>
 </main>
@@ -615,7 +620,9 @@ tile('Now', S.status_text, 'based on the last 5 minutes', S.status);
 tile('Cloudflare latency', fmtMs(S.latency_15m.cloudflare), 'median, last 15 min');
 const lossNet = ['cloudflare', 'google'].map(k => S.loss_1h_pct[k]).filter(v => v != null);
 tile('Packet loss', lossNet.length ? Math.max(...lossNet).toFixed(1) + '%' : '–', 'worst internet target, last hour');
-tile('DNS via Pi-hole', fmtMs(S.dns_15m.pihole && S.dns_15m.pihole.ms), 'median, last 15 min');
+tile('DNS via Pi-hole', fmtMs(S.dns_15m.pihole && S.dns_15m.pihole.ms), 'cached name, median, last 15 min');
+const fw = S.dns_15m.forwarder; tile('Encrypted DNS', fw ? fmtMs(fw.ms) : '–',
+  fw ? 'new names via the forwarder, ' + (fw.fail_pct || 0) + '% failed, last 15 min' : 'not measured');
 const sp = S.speed_last; tile('Last speed test', sp && sp.down_mbps != null ? sp.down_mbps + ' / ' + (sp.up_mbps != null ? sp.up_mbps : '–') + ' Mbps' : '–',
   sp ? 'down / up, ' + ago(sp.ts) : 'none yet');
 
@@ -716,8 +723,10 @@ const P = D.ping_ms || {}, N = D.dns_ms || {}, HS = D.https_ms || {};
 lineChart(charts, 'Internet latency', 'Ping round trip from the Pi.', 'ms',
   [{label: L.isp, color: '--isp', values: P.isp}, {label: L.cloudflare, color: '--cloudflare', values: P.cloudflare}, {label: L.google, color: '--google', values: P.google}], {cap: 400});
 lossStrip(charts);
-lineChart(charts, 'DNS lookup time', 'Through Pi-hole (cached name) and straight to each resolver (new name every time).', 'ms',
-  [{label: L.pihole, color: '--pihole', values: N.pihole}, {label: L.cloudflare, color: '--cloudflare', values: N.cloudflare}, {label: L.google, color: '--google', values: N.google}], {cap: 1000});
+lineChart(charts, 'DNS lookup time: your network', 'What your devices get. Pi-hole with a popular name (usually cached) and with a new name every time, and the encrypted forwarder Pi-hole sends unanswered names to (new name every time).', 'ms',
+  [{label: L.pihole, color: '--pihole', values: N.pihole}, {label: L.pihole_new, color: '--pnew', values: N.pihole_new}, {label: L.forwarder, color: '--fwd', values: N.forwarder}], {cap: 1000});
+lineChart(charts, 'DNS lookup time: direct, unencrypted (control)', 'Straight to each resolver over plain UDP, new name every time. If the encrypted forwarder slows down while these stay flat, the problem is the encrypted path; if all rise together, it is the line to the ISP.', 'ms',
+  [{label: L.cloudflare, color: '--cloudflare', values: N.cloudflare}, {label: L.google, color: '--google', values: N.google}], {cap: 1000});
 lineChart(charts, 'Router latency', 'Ping to the router over the Pi\'s Ethernet cable: a rise here points at the LAN or the router itself.', 'ms',
   [{label: L.router, color: '--router', values: P.router}], {cap: 100});
 lineChart(charts, 'HTTPS to Cloudflare', 'TCP connect, TLS handshake and first byte, every 5 minutes.', 'ms',
@@ -829,7 +838,7 @@ def demo_data(store, days=7):
             loss = 1.0 if (outage and name != "router") else (0.2 if rnd.random() < 0.01 else 0.0)
             rtt = None if loss >= 1 else round(base * evening * (1 + rnd.random() * 0.15), 2)
             store.add(ts, "ping", name, rtt is not None, rtt, loss)
-        for name, base in (("pihole", 1.5), ("cloudflare", 40.0), ("google", 70.0)):
+        for name, base in (("pihole", 1.5), ("pihole_new", 45.0), ("forwarder", 41.0), ("cloudflare", 40.0), ("google", 70.0)):
             ok = not outage or name == "pihole"
             store.add(ts, "dns", name, ok, round(base * (1 + rnd.random()), 2) if ok else None, None, {"rcode": 0})
         if ts % 300 < 60:
