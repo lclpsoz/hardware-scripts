@@ -1,0 +1,24 @@
+# Sedentary reminders: phone step counter in, ntfy escalation out.
+# Docs: raspberry-pi/12-sedentary-reminders.md
+services:
+  steps:
+    container_name: steps
+    image: python:3.13-alpine
+    network_mode: host              # LAN port 8097 for the phone, ntfy on 127.0.0.1:2586
+    user: "1000:1000"
+    command: ["python", "-u", "/app/steps.py"]
+    env_file: config.env            # NTFY_TOPIC and STEPS_TOKEN (secrets, not in the repo)
+    environment:
+      TZ: America/Sao_Paulo
+      NTFY_URL: http://127.0.0.1:2586
+    volumes:
+      - ./steps.py:/app/steps.py:ro
+      - ./data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 32m
+    cpus: "0.15"
+    restart: unless-stopped
