@@ -1,0 +1,19 @@
+# Self-hosted ntfy (push notifications), reachable at http://ntfy.lan through the proxy.
+# Docs: raspberry-pi/11-notifications.md
+services:
+  ntfy:
+    container_name: ntfy
+    image: binwiederhier/ntfy:latest
+    command: ["serve"]
+    network_mode: host                 # listens on 127.0.0.1:2586 only (see server.yml)
+    environment:
+      TZ: America/Sao_Paulo
+    volumes:
+      - ./server.yml:/etc/ntfy/server.yml:ro
+      - ./cache:/var/cache/ntfy        # message cache (12 h), small
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 64m
+    cpus: "0.25"
+    restart: unless-stopped

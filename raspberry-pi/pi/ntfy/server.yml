@@ -1,0 +1,11 @@
+# ntfy server settings. Only the proxy (nginx, ntfy.lan) reaches it.
+base-url: "http://ntfy.lan"
+listen-http: "127.0.0.1:2586"
+behind-proxy: true
+cache-file: "/var/cache/ntfy/cache.db"
+cache-duration: "24h"
+# Fewer SD card writes: no attachments, no web push, no upstream relay
+attachment-cache-dir: ""
+enable-signup: false
+enable-login: false
+log-level: warn
