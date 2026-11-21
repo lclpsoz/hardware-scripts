@@ -1,5 +1,7 @@
 # Pi-hole: the 150-query limit, a missing blocklist and other findings
 
+> **Reading the query database:** since `database.DBinterval` is 300, `pihole-FTL.db` lags the live log by up to 5 minutes. For the last few minutes use `docker exec pihole grep "from <ip>" /var/log/pihole/pihole.log` or the web Query Log, which reads memory. Querying the database too early can wrongly show a device as silent.
+
 Checked 2026-11-20, read-only. Pi-hole Core v6.5, Web v6.6.1, FTL v6.8 (Core v6.6 and FTL v6.9 are available). Docker host networking, listening mode `LOCAL`, upstreams 8.8.8.8 and 8.8.4.4.
 
 **Bottom line:** the "150 concurrent queries" warning is not a resource limit. RAM and CPU were fine. It is a count of upstream queries waiting for an answer. It fills up when one device loads ad-heavy pages and some of those forwards never get a reply.
