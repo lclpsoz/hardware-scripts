@@ -2,6 +2,8 @@
 
 A Raspberry Pi 3 Model B (1 GB, Debian 13) at 192.168.0.250 running Pi-hole, NetAlertX, Beszel, a `.lan` proxy and an internet-quality logger, all in Docker. **Start at http://home.lan.**
 
+**What is still open:** [PENDING.md](PENDING.md).
+
 This folder holds:
 
 - the investigation and its decisions (the numbered docs);
@@ -93,6 +95,7 @@ This folder holds:
 | [08-internet-quality.md](08-internet-quality.md) | netq: what it measures, speed-test limits, operations |
 | [09-encrypted-dns.md](09-encrypted-dns.md) | Encrypted upstream DNS: pros, cons, options, draft |
 | [10-ad-blocking.md](10-ad-blocking.md) | Blocking status, list comparison, what DNS can't block |
+| [PENDING.md](PENDING.md) | **What is still open**, by priority, with what each item waits for |
 | [CHANGES.md](CHANGES.md) | Everything changed on the Pi, with undo |
 | [pi/](pi/) | What runs on the Pi: compose files, Pi-hole changed settings, systemd units, boot config (secrets redacted), plus the proxy, netq and NetAlertX patch that are deployed from here |
 | [scripts/pi-checkup.sh](scripts/pi-checkup.sh) | Read-only health check: `ssh pi 'bash -s' < raspberry-pi/scripts/pi-checkup.sh` |
