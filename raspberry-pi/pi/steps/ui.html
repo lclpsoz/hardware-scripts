@@ -197,7 +197,11 @@
       </div>
       <h2 style="margin-top:22px">Notifications</h2>
       <p class="hint">Text, priority and repeat of each notification. You can use <code>{min}</code> (minutes sitting), <code>{snooze}</code>, <code>{steps}</code> and <code>{stale}</code>. Priority 1–2 is silent, 3 plays the app's default sound, 4 adds vibration, 5 is the loudest. Each level can have its own sound in Android's settings for the ntfy app. <b>Test</b> sends the <i>saved</i> version, so press Save first.</p>
-      <label class="check" style="margin:8px 0"><input type="checkbox" id="s_phone_alarm"> Phone alarm at level 4 (the phone loop speaks "Get up and walk now" on the alarm volume, needs the updated loop script)</label>
+      <label class="check" style="margin:8px 0"><input type="checkbox" id="s_phone_alarm"> Phone alarm at level 4 (the phone loop speaks the phrase below on the alarm volume)</label>
+      <div class="orow">
+        <label class="f">Alarm phrase<input type="text" id="s_alarm_text" maxlength="60" style="width:15em"></label>
+        <label class="f">Alarm volume (% of max)<input type="number" id="s_alarm_volume" min="10" max="100"></label>
+      </div>
       <div id="notifs"></div>
       <div class="row" style="margin-top:16px">
         <button class="primary" id="save">Save</button>
@@ -221,6 +225,8 @@
         <button id="dbgSitGo">Set sitting time</button>
       </div>
       <p class="hint">Pretends you have been sitting this long. Reminders fire at the usual levels (for example 55 sends the light one within seconds, 80 starts the constant one).</p>
+      <div class="row" style="margin-top:14px"><button id="dbgAlarmGo">Play the phone alarm once</button></div>
+      <p class="hint">Uses the saved phrase and volume. It plays at the phone's next report (the phone is asked to report every few seconds for a minute, so expect up to about 10 s; with a 60 s interval it can take up to a minute to start).</p>
       <div id="dbgMsg" class="hint"></div>
     </details>
   </div>
@@ -280,7 +286,7 @@ function fillForm(s) {
   s.levels_min.forEach((v, i) => $('l' + i).value = v);
   $('s_move_steps').value = s.move_steps;
   $('s_move_window_min').value = Math.round(s.move_window_s / 60); $('s_stale_min').value = s.stale_min;
-  $('s_phone_alarm').checked = s.phone_alarm;
+  $('s_phone_alarm').checked = s.phone_alarm; $('s_alarm_text').value = s.alarm_text; $('s_alarm_volume').value = s.alarm_volume;
   for (let i = 0; i < 4; i++) { const o = s.snooze_opts[i]; $('o' + i + 'm').value = o ? o[0] : ''; $('o' + i + 'b').value = o ? o[1] : ''; }
   $('s_report_idle_s').value = s.report_idle_s; $('s_report_walk_s').value = s.report_walk_s; $('s_walk_spm').value = s.walk_spm;
   $('s_quiet_enabled').checked = s.quiet_enabled; $('s_quiet_start').value = s.quiet_start; $('s_quiet_end').value = s.quiet_end;
@@ -303,7 +309,7 @@ function readForm() {
     levels_min: [0, 1, 2, 3].map(i => Number($('l' + i).value)),
     move_steps: Number($('s_move_steps').value),
     move_window_s: Number($('s_move_window_min').value) * 60, stale_min: Number($('s_stale_min').value),
-    phone_alarm: $('s_phone_alarm').checked, snooze_opts: opts,
+    phone_alarm: $('s_phone_alarm').checked, alarm_text: $('s_alarm_text').value, alarm_volume: Number($('s_alarm_volume').value), snooze_opts: opts,
     report_idle_s: Number($('s_report_idle_s').value), report_walk_s: Number($('s_report_walk_s').value), walk_spm: Number($('s_walk_spm').value),
     quiet_enabled: $('s_quiet_enabled').checked, quiet_start: $('s_quiet_start').value, quiet_end: $('s_quiet_end').value,
     notif
@@ -519,6 +525,7 @@ async function debugCall(path, body) {
   catch (e) { m.textContent = e.message; m.className = 'hint'; m.style.color = 'var(--bad)'; }
 }
 $('dbgStepsGo').onclick = () => debugCall('/api/debug/steps', { n: Number($('dbgSteps').value) });
+$('dbgAlarmGo').onclick = () => debugCall('/api/debug/alarm', {});
 $('dbgSitGo').onclick = () => debugCall('/api/debug/sitting', { min: Number($('dbgSit').value) });
 
 buildForms();

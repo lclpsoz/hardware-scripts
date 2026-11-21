@@ -8,14 +8,16 @@
 . ~/.steps-env
 
 alarm() {
-  # Alarm volume to the maximum, a forced vibration, and the phrase spoken on the ALARM stream
-  # (it plays even when the ringer is silent; only a Do Not Disturb that blocks alarms mutes it).
+  # $1 = phrase, $2 = volume in percent of the alarm stream's maximum (both come from the Pi).
+  # Plays on the ALARM stream, so it is heard with the ringer silent; only a Do Not Disturb that
+  # blocks alarms mutes it.
+  say=${1:-Time to walk}; pct=${2:-50}
   if command -v termux-volume >/dev/null; then
     mx=$(termux-volume 2>/dev/null | tr -d ' \n' | grep -o '"stream":"alarm","volume":[0-9]*,"max_volume":[0-9]*' | grep -o '[0-9]*$')
-    [ -n "$mx" ] && termux-volume alarm "$mx" >/dev/null 2>&1
+    if [ -n "$mx" ]; then v=$(( mx * pct / 100 )); [ "$v" -lt 1 ] && v=1; termux-volume alarm "$v" >/dev/null 2>&1; fi
   fi
-  command -v termux-vibrate >/dev/null && termux-vibrate -f -d 800
-  command -v termux-tts-speak >/dev/null && termux-tts-speak -s ALARM "Get up and walk now"
+  command -v termux-vibrate >/dev/null && termux-vibrate -f -d 600 &
+  command -v termux-tts-speak >/dev/null && termux-tts-speak -s ALARM "$say"
 }
 
 while true; do
@@ -26,7 +28,11 @@ while true; do
     reply=$(curl -fsS -m 10 "$PI/steps?steps=$n&t=$TOKEN" 2>/dev/null)
     w=$(printf '%s' "$reply" | grep -oE '"next_s": *[0-9]+' | grep -oE '[0-9]+$')
     [ -n "$w" ] && wait=$w
-    printf '%s' "$reply" | grep -qE '"alarm": *1' && alarm
+    if printf '%s' "$reply" | grep -qE '"alarm": *1'; then
+      say=$(printf '%s' "$reply" | grep -oE '"say": *"[^"]*"' | sed 's/^"say": *"//; s/"$//')
+      pct=$(printf '%s' "$reply" | grep -oE '"vol": *[0-9]+' | grep -oE '[0-9]+$')
+      alarm "$say" "$pct"
+    fi
   fi
   sleep "$wait"
 done

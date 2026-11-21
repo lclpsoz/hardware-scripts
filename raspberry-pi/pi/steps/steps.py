@@ -26,10 +26,12 @@ Endpoints (token in header X-Token or ?t=):
   POST /api/test              {"type": "level2"|"moved"|...} send that notification
   POST /api/debug/steps       {"n": N} fake report with the counter raised by N (hollow dot)
   POST /api/debug/sitting     {"min": M} pretend you have been sitting M minutes
+  POST /api/debug/alarm       play the phone alarm once, at the next report
   GET  /health                no token
 """
 import copy
 import hmac
+import re
 import json
 import os
 import signal
@@ -88,6 +90,8 @@ DEFAULTS = {
     # snooze buttons: [minutes, offered only while sitting under this many minutes (0 = always)]
     "snooze_opts": [[30, 90], [5, 110], [1, 0]],
     "phone_alarm": True,                # at the last level the phone loop plays a loud alarm
+    "alarm_text": "Time to walk",        # what the phone says on the alarm volume
+    "alarm_volume": 50,                 # alarm volume, percent of the phone's maximum
     "notif": NOTIF_DEFAULTS,
     "report_idle_s": int(E("REPORT_IDLE_S", "60")),     # how often the phone should report normally
     "report_walk_s": int(E("REPORT_WALK_S", "10")),     # ... while you are walking
@@ -97,7 +101,7 @@ WALK_HOLD_S = 60      # keep reporting fast this long after the last walking see
 SET = copy.deepcopy(DEFAULTS)
 
 lock = threading.Lock()
-S = {"last_move": time.time(), "snooze_start": 0.0, "snooze_until": 0.0, "snooze_kind": "", "last_sample": 0.0, "walk_until": 0.0, "stats_flush": 0.0,
+S = {"last_move": time.time(), "snooze_start": 0.0, "snooze_until": 0.0, "snooze_kind": "", "last_sample": 0.0, "walk_until": 0.0, "stats_flush": 0.0, "alarm_test": False,
      "stale_told": False, "level_sent": 0, "last_repeat": 0.0, "steps": None, "started": time.time()}
 samples = deque()
 stats = {}            # "YYYY-MM-DD" -> day record
@@ -257,6 +261,13 @@ def validate(d):
     num("move_steps", 10, 5000)
     num("move_window_s", 60, 3600)
     num("stale_min", 5, 240)
+    num("alarm_volume", 10, 100)
+    if "alarm_text" in d:
+        txt = str(d["alarm_text"]).strip()
+        if re.fullmatch(r"[\w .,!?'-]{1,60}", txt):
+            out["alarm_text"] = txt
+        else:
+            err.append("alarm_text must be 1-60 letters, digits, spaces or . , ! ? ' -")
     num("report_idle_s", 5, 600)
     num("report_walk_s", 2, 120)
     num("walk_spm", 5, 200)
@@ -459,7 +470,13 @@ def add_sample(n, manual=False):
 
 
 def next_report_s(t):
-    return SET["report_walk_s"] if t < S["walk_until"] else SET["report_idle_s"]
+    n = SET["report_walk_s"] if t < S["walk_until"] else SET["report_idle_s"]
+    snoozed = S["snooze_until"] and t < S["snooze_until"]
+    # near the last level the alarm needs fresh reports: it can only sound when the phone reports
+    if (SET["phone_alarm"] and SET["enabled"] and not snoozed and not in_quiet(t)
+            and (S["level_sent"] >= 3 or sitting_min(t) >= SET["levels_min"][3] - 2)):
+        n = min(n, SET["notif"]["level4"]["repeat_s"] or 20)
+    return n
 
 
 def end_snooze(t):
@@ -561,7 +578,7 @@ class H(BaseHTTPRequestHandler):
         pass
 
     def reply(self, code, body, ctype="application/json"):
-        b = body if isinstance(body, bytes) else (json.dumps(body) + "\n").encode()
+        b = body if isinstance(body, bytes) else (json.dumps(body, ensure_ascii=False) + "\n").encode()
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(b)))
@@ -601,11 +618,14 @@ class H(BaseHTTPRequestHandler):
                 with lock:
                     if time.time() - S["stats_flush"] >= 60:      # at most once a minute
                         flush_stats()
-                    alarm = alarm_active(time.time())
-                    rep = SET["notif"]["level4"]["repeat_s"]
-                    if alarm and rep:
-                        nxt = min(nxt, rep)                       # ask for reports as often as the alarm repeats
-                return self.reply(200, {"ok": True, "next_s": nxt, "alarm": int(alarm)})
+                    now = time.time()
+                    alarm = alarm_active(now) or S["alarm_test"]
+                    S["alarm_test"] = False                       # the debug test plays once
+                    nxt = min(nxt, next_report_s(now))            # fast reports as the last level nears
+                out = {"ok": True, "next_s": nxt, "alarm": int(alarm)}
+                if alarm:
+                    out["say"], out["vol"] = SET["alarm_text"], SET["alarm_volume"]
+                return self.reply(200, out)
             if u.path == "/snooze":
                 m = int((q.get("min") or [0])[0])
                 with lock:
@@ -667,6 +687,12 @@ class H(BaseHTTPRequestHandler):
                     S["level_sent"], S["last_repeat"] = 0, 0.0
                     save_state()
                 log("debug: sitting timer set to", m, "min")
+                return self.reply(200, {"ok": True})
+            if u.path == "/api/debug/alarm" and self.command == "POST":
+                with lock:
+                    S["alarm_test"] = True
+                    S["walk_until"] = time.time() + 60    # fast reports so it plays soon
+                log("debug: phone alarm will play at the next report")
                 return self.reply(200, {"ok": True})
             if u.path == "/api/test" and self.command == "POST":
                 typ = str(self.body_json().get("type", ""))
