@@ -77,3 +77,60 @@ That is about 530 GB a year. It isn't alarming for a 64 GB card, but it is more 
 - **Journal:** persistent with a 50 MB cap, 25 MB used.
 - **Failed systemd units:** none.
 - **Containers:** none restarting. Pi-hole and NetAlertX report healthy.
+
+## Follow-ups, 2026-11-20 evening
+
+### Why HDMI says "connected" with nothing plugged in
+
+You confirmed that nothing is connected. The cause is on the Pi's side:
+
+1. **The hot-plug line reads as asserted.** The kernel's HDMI driver (vc4) reads it through the firmware: line 4 `HDMI_HPD_N` on the GPIO expander, active-low. It says a display is attached.
+2. **There is no display data.** No screen answers, so the EDID is 0 bytes and the driver falls back to stock modes (1024x768, 800x600, 848x480, 640x480).
+3. **It is checked every 10 s.** That line can't raise an interrupt, so the kernel polls the connector. Each check reads the empty data again and logs `HDMI: Unknown ELD version 0`, about 8,400 lines a day.
+
+So either the board's hot-plug circuit reads "connected" when it shouldn't, or the firmware reports it that way. Nothing outside the Pi is involved. Since the port isn't used, the fix is to turn the connector off.
+
+**This needs root, which I don't have** (sudo asks for a password). Run these yourself, or see the sudo note in the README:
+
+```bash
+# immediately, until the next reboot:
+echo off | sudo tee /sys/class/drm/card0-HDMI-A-1/status
+# permanently: append to the single line of cmdline.txt (keep a backup), then reboot
+sudo cp /boot/firmware/cmdline.txt /boot/firmware/cmdline.txt.bak-hdmi
+sudo sed -i '1 s/$/ video=HDMI-A-1:d/' /boot/firmware/cmdline.txt
+cat /boot/firmware/cmdline.txt        # must still be ONE line ending in video=HDMI-A-1:d
+```
+
+Check after the reboot: `cat /sys/class/drm/card0-HDMI-A-1/status` should print `disconnected`, and `journalctl -k -b | grep -c 'Unknown ELD'` should print 0. Undo: `sudo cp /boot/firmware/cmdline.txt.bak-hdmi /boot/firmware/cmdline.txt` and reboot.
+
+### Are the SD card writes too much?
+
+**No, not for wear.**
+
+- **Normal days:** about 1.46 GB a day, roughly 0.5 TB a year.
+- **Today's upgrade:** about 1.8 GB more in ten minutes. That covers the kernel, its initramfs for both the Pi 3 and Pi 5 kernels, and the Docker packages.
+
+SanDisk doesn't publish an endurance figure for standard microSD cards, but even cautious estimates for a 64 GB card are several TB of writes, so wear is years away at this rate (an estimate, not a measurement).
+
+**The real risk to the card is power, not volume.** Today's upgrade wrote files during 20 undervoltage events.
+
+Reductions done or under way:
+
+- **Pi-hole `DBinterval` 60 → 300 (done).** Fewer, larger database commits.
+- **The TV's retry storm (paused while it's unplugged)** was about 35% of Pi-hole's query log and database rows.
+- **The HDMI fix above** removes most of the journal's lines.
+- **netq writes in batches** every 5 minutes.
+
+Re-check in a few days: `pi-checkup.sh` prints MiB/day since boot.
+
+### Impact of the `apt upgrade` you ran (20:32-20:39)
+
+| Check | Result |
+| --- | --- |
+| Packages | 50 upgraded, including docker-ce and containerd, kernel 6.18.60 (Pi 3 and Pi 5 variants), rpi-eeprom (unused on a Pi 3) and security fixes. 4 camera packages are held back because they need new dependencies (`apt full-upgrade` would add them). Not needed on this Pi. |
+| Undervoltage | **20 events in those ten minutes**, close to a whole day's usual count, from the CPU and disk load of unpacking |
+| Containers | The Docker upgrade restarted all of them at 20:37, so DNS was down for a few seconds. All came back healthy. |
+| File system | No ext4 or MMC errors in the kernel log. `dpkg --audit` is clean (no half-installed packages). |
+| Boot files | `kernel8.img` matches the package checksum, and `initramfs8` is identical to its source, so the next boot is safe from that side |
+| Reboot | **Pending.** The new kernel 6.18.60 is installed, and 6.18.50 is running. Best done once, after the power supply arrives, together with the HDMI line above. |
+| Memory and CPU now | 506 MiB available, swap 58 MiB used, load back below 1 |
