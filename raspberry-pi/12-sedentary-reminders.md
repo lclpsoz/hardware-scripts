@@ -18,6 +18,8 @@ Shows the sitting timer with the reminder levels, the mode (watching, snoozed, q
 
 - The page asks for the `STEPS_TOKEN` once and keeps it in the browser. The settings are saved in `~/steps/data/settings.json` and apply at once.
 - Stats are kept for 30 days in `~/steps/data/stats.json`, written every 15 minutes (and on stop), so the SD card sees few writes. A restart loses at most 15 minutes of stats.
+- **Phone data** (3 h / 12 h / 24 h switch): *Steps per minute* shows the walking rate between consecutive reports against the moving rate (green bars count as moving), and *When the phone reported* plots one dot per report with the step counter value, red bands where reports were missing for 6 min or more, and a table of the last 8 reports. A counter that drops means the phone restarted.
+- Every report (time and counter value) is kept for 24 hours in `~/steps/data/reports.json`, written every 15 minutes and on stop (about 12 KB). The sitting timer is also saved there (`state.json`), so a restart keeps it unless it is older than the phone-silent limit.
 - The card on [home.lan](http://home.lan) shows whether it answers.
 
 ## Files

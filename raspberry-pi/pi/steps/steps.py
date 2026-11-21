@@ -18,6 +18,7 @@ Endpoints (token in header X-Token or ?t=):
   GET  /resume                cancel the snooze
   GET  /status                small JSON state
   GET  /api/state             everything the page shows
+  GET  /api/samples?hours=3   every phone report (time, counter) of the last 1-24 h
   POST /api/settings          JSON body with any settings, validated
   POST /api/test              send a test notification
   GET  /health                no token
@@ -43,6 +44,7 @@ PUBLIC = E("STEPS_PUBLIC_URL", "http://192.168.0.250:8097")  # used by the snooz
 DATA = E("DATA_DIR", "/data")
 UI_FILE = E("UI_FILE", "/app/ui.html")
 KEEP_DAYS = 30
+KEEP_REPORTS_H = 24
 
 
 def _quiet_default():
@@ -72,6 +74,8 @@ S = {"last_move": time.time(), "snooze_until": 0.0, "snooze_kind": "", "last_sam
 samples = deque()
 stats = {}            # "YYYY-MM-DD" -> day record
 stats_dirty = False
+reports = deque()     # [unix time, counter value] of every phone report, last 24 h
+reports_dirty = False
 
 
 def log(*a):
@@ -109,7 +113,10 @@ def save_settings():
 
 
 def flush_stats(force=False):
-    global stats_dirty
+    global stats_dirty, reports_dirty
+    if reports_dirty or force:
+        write_json("reports.json", list(reports))
+        reports_dirty = False
     if stats_dirty or force:
         cutoff = time.strftime("%Y-%m-%d", time.localtime(time.time() - KEEP_DAYS * 86400))
         for k in [k for k in stats if k < cutoff]:
@@ -131,6 +138,12 @@ def load():
     if isinstance(lm, (int, float)) and 0 < t - lm <= SET["stale_min"] * 60:
         S["last_move"] = lm
         log("sitting timer restored:", round((t - lm) / 60, 1), "min")
+    rp = read_json("reports.json")
+    if isinstance(rp, list):
+        cut = time.time() - KEEP_REPORTS_H * 3600
+        for x in rp:
+            if isinstance(x, list) and len(x) == 2 and x[0] >= cut:
+                reports.append(x)
     st = read_json("stats.json")
     if isinstance(st, dict):
         stats.update(st)
@@ -243,8 +256,13 @@ def reset(t, why):
 
 
 def add_sample(n):
+    global reports_dirty
     t = time.time()
     with lock:
+        reports.append([int(t), n])
+        while reports and reports[0][0] < t - KEEP_REPORTS_H * 3600:
+            reports.popleft()
+        reports_dirty = True
         prev = samples[-1][1] if samples else S["steps"]
         if samples and n < samples[-1][1]:       # phone rebooted: counter restarted
             samples.clear()
@@ -420,6 +438,12 @@ class H(BaseHTTPRequestHandler):
                     return self.reply(200, state(time.time()))
             if u.path == "/api/state":
                 return self.reply(200, full_state())
+            if u.path == "/api/samples":
+                h = max(1, min(KEEP_REPORTS_H, int((q.get("hours") or [3])[0])))
+                t = time.time()
+                with lock:
+                    out = [x for x in reports if x[0] >= t - h * 3600]
+                return self.reply(200, {"now": int(t), "hours": h, "samples": out})
             if u.path == "/api/settings" and self.command == "POST":
                 ok, err = validate(self.body_json())
                 if err:

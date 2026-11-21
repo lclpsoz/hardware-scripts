@@ -58,8 +58,21 @@
   #msg { min-height: 1.4em; font-size: 14px; margin-top: 8px; }
   #msg.err { color: var(--bad); } #msg.ok { color: var(--ok); }
   .hint { color: var(--muted); font-size: 13px; margin-top: 6px; }
-  svg text { fill: var(--muted); font-size: 10px; }
+  svg text { fill: var(--muted); font-size: 11px; }
   svg .b { fill: var(--accent); }
+  svg .grid { stroke: var(--line); stroke-width: 1; }
+  svg .thr { stroke: var(--warn); stroke-width: 1.2; stroke-dasharray: 4 3; }
+  svg .gap { fill: var(--bad); opacity: .14; }
+  svg .ln { stroke: var(--accent); fill: none; stroke-width: 1.5; stroke-linejoin: round; }
+  svg .dt { fill: var(--accent); }
+  svg .hi { fill: var(--ok); }
+  svg .lo { fill: var(--accent); opacity: .75; }
+  svg text.warn { fill: var(--warn); paint-order: stroke; stroke: var(--card); stroke-width: 3px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; padding: 5px 12px; background: var(--card); }
+  .seg button.on { background: var(--accent); color: #fff; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
   .hidden { display: none; }
   .scroll { overflow-x: auto; }
   td.bt, th.bt { width: 30%; }
@@ -113,6 +126,29 @@
 
     <h2>Steps per hour today</h2>
     <div class="card"><svg id="hours" viewBox="0 0 480 110" width="100%" role="img" aria-label="Steps per hour today"></svg></div>
+
+    <div class="row" style="justify-content:space-between;margin-top:28px">
+      <h2 style="margin:0">Phone data</h2>
+      <div class="seg" id="rng"><button data-h="3" class="on">3 h</button><button data-h="12">12 h</button><button data-h="24">24 h</button></div>
+    </div>
+
+    <h2>Steps per minute</h2>
+    <div class="card">
+      <svg id="rate" viewBox="0 0 480 160" width="100%" role="img" aria-label="Steps per minute over time"></svg>
+      <div class="legend"><span><i class="sw" style="background:var(--ok)"></i>counts as moving</span><span><i class="sw" style="background:var(--accent);opacity:.75"></i>below the moving rate</span><span><i class="sw" style="background:var(--warn)"></i>moving rate (dashed)</span></div>
+      <div class="hint" id="rateNote"></div>
+    </div>
+
+    <h2>When the phone reported</h2>
+    <div class="card">
+      <svg id="rep" viewBox="0 0 480 160" width="100%" role="img" aria-label="Phone reports and step counter values"></svg>
+      <div class="legend"><span><i class="sw" style="background:var(--accent)"></i>one dot per report (the line is the phone's step counter)</span><span><i class="sw" style="background:var(--bad);opacity:.3"></i>no reports</span></div>
+      <div class="hint" id="repNote"></div>
+      <div class="scroll" style="margin-top:8px"><table>
+        <thead><tr><th>Time</th><th class="n">Counter</th><th class="n">Steps since</th><th class="n">After</th></tr></thead>
+        <tbody id="recent"></tbody>
+      </table></div>
+    </div>
 
     <h2>Last 14 days</h2>
     <div class="card scroll"><table>
@@ -250,11 +286,123 @@ function render(d) {
   });
 }
 
+const NS = 'http://www.w3.org/2000/svg';
+let range = 3;
+function el(tag, attrs, parent, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function hhmm(ts) { const d = new Date(ts * 1000); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
+function niceMax(v) { const p = Math.pow(10, Math.floor(Math.log10(v))); for (const m of [1, 2, 2.5, 5, 10]) if (m * p >= v) return m * p; return 10 * p; }
+const G = { W: 480, H: 160, L: 36, R: 474, T: 18, B: 136 };
+function frame(svg, t0, t1, ymax, unit) {
+  svg.textContent = '';
+  const span = t1 - t0, hours = span / 3600, step = hours <= 3 ? 1800 : hours <= 12 ? 7200 : 14400;
+  const off = -new Date().getTimezoneOffset() * 60;
+  const X = t => G.L + (t - t0) / span * (G.R - G.L), Y = v => G.B - v / ymax * (G.B - G.T);
+  [0, 0.5, 1].forEach(f => {
+    el('line', { class: 'grid', x1: G.L, x2: G.R, y1: Y(ymax * f), y2: Y(ymax * f) }, svg);
+    el('text', { x: G.L - 4, y: Y(ymax * f) + 3, 'text-anchor': 'end' }, svg, Math.round(ymax * f * 10) / 10);
+  });
+  for (let t = Math.ceil((t0 + off) / step) * step - off; t <= t1; t += step) {
+    el('line', { class: 'grid', x1: X(t), x2: X(t), y1: G.B, y2: G.B + 3 }, svg);
+    el('text', { x: X(t), y: G.B + 14, 'text-anchor': 'middle' }, svg, hhmm(t));
+  }
+  if (unit) el('text', { x: G.L, y: 9, 'text-anchor': 'start' }, svg, unit);
+  return { X, Y };
+}
+const GAP_MIN = 6;   // minutes without a report that count as "no data"
+
+function drawRate(j) {
+  const svg = $('rate'), s = j.samples, t1 = j.now, t0 = t1 - j.hours * 3600;
+  const thr = settings.move_steps / (settings.move_window_s / 60), bars = [];
+  let total = 0, peak = 0;
+  for (let i = 1; i < s.length; i++) {
+    const dt = (s[i][0] - s[i - 1][0]) / 60, d = s[i][1] - s[i - 1][1];
+    if (d < 0 || dt <= 0 || dt > GAP_MIN * 1.7) continue;   // phone rebooted, or a gap
+    const spm = d / dt; bars.push([s[i - 1][0], s[i][0], spm, d]); total += d; peak = Math.max(peak, spm);
+  }
+  const ymax = niceMax(Math.max(peak * 1.05, thr * 1.4, 10)), { X, Y } = frame(svg, t0, t1, ymax, 'steps per minute');
+  bars.forEach(b => {
+    const x = X(b[0]), w = Math.max(1.2, X(b[1]) - x - 0.5), h = Math.max(b[2] ? 1 : 0, G.B - Y(b[2]));
+    const r = el('rect', { class: b[2] >= thr ? 'hi' : 'lo', x, y: G.B - h, width: w, height: h, rx: 1 }, svg);
+    el('title', {}, r, hhmm(b[0]) + '–' + hhmm(b[1]) + ' · ' + b[2].toFixed(1) + ' steps/min (' + b[3] + ' steps)');
+  });
+  el('line', { class: 'thr', x1: G.L, x2: G.R, y1: Y(thr), y2: Y(thr) }, svg);
+  el('text', { class: 'warn', x: G.R, y: Y(thr) - 3, 'text-anchor': 'end' }, svg, 'moving: ' + Math.round(thr) + '/min');
+  const mins = bars.reduce((a, b) => a + (b[1] - b[0]) / 60, 0);
+  $('rateNote').textContent = bars.length ? total + ' steps over ' + Math.round(mins) + ' min of data · average ' + (total / mins).toFixed(1) + '/min · fastest ' + peak.toFixed(0) + '/min' : 'Not enough reports yet (need two in a row).';
+}
+
+function drawReports(j) {
+  const svg = $('rep'), s = j.samples, t1 = j.now, t0 = t1 - j.hours * 3600;
+  let lo = Math.min(...s.map(x => x[1])), hi = Math.max(...s.map(x => x[1]));
+  if (!s.length) { lo = 0; hi = 10; }
+  if (hi - lo < 10) { hi = lo + 10; }
+  const pad = (hi - lo) * 0.08, vmin = Math.max(0, Math.floor(lo - pad)), vmax = Math.ceil(hi + pad);
+  svg.textContent = '';
+  const span = t1 - t0, hours = span / 3600, step = hours <= 3 ? 1800 : hours <= 12 ? 7200 : 14400, off = -new Date().getTimezoneOffset() * 60;
+  const X = t => G.L + (t - t0) / span * (G.R - G.L), Y = v => G.B - (v - vmin) / (vmax - vmin) * (G.B - G.T);
+  [0, 0.5, 1].forEach(f => {
+    const v = vmin + (vmax - vmin) * f;
+    el('line', { class: 'grid', x1: G.L, x2: G.R, y1: Y(v), y2: Y(v) }, svg);
+    el('text', { x: G.L - 4, y: Y(v) + 3, 'text-anchor': 'end' }, svg, Math.round(v).toLocaleString());
+  });
+  for (let t = Math.ceil((t0 + off) / step) * step - off; t <= t1; t += step) {
+    el('line', { class: 'grid', x1: X(t), x2: X(t), y1: G.B, y2: G.B + 3 }, svg);
+    el('text', { x: X(t), y: G.B + 14, 'text-anchor': 'middle' }, svg, hhmm(t));
+  }
+  el('text', { x: G.L, y: 9 }, svg, 'step counter value');
+  // gaps: before the first report, between reports, and since the last one
+  const edges = [[t0, s.length ? s[0][0] : t1]];
+  for (let i = 1; i < s.length; i++) edges.push([s[i - 1][0], s[i][0]]);
+  if (s.length) edges.push([s[s.length - 1][0], t1]);
+  let longest = 0;
+  edges.forEach(([a, b]) => {
+    const m = (b - a) / 60;
+    if (m > GAP_MIN) {
+      longest = Math.max(longest, m);
+      const r = el('rect', { class: 'gap', x: X(a), y: G.T, width: Math.max(1, X(b) - X(a)), height: G.B - G.T }, svg);
+      el('title', {}, r, 'no reports ' + hhmm(a) + '–' + hhmm(b) + ' (' + Math.round(m) + ' min)');
+    }
+  });
+  if (s.length) {
+    el('polyline', { class: 'ln', points: s.map(x => X(x[0]).toFixed(1) + ',' + Y(x[1]).toFixed(1)).join(' ') }, svg);
+    s.forEach((x, i) => {
+      const c = el('circle', { class: 'dt', cx: X(x[0]), cy: Y(x[1]), r: s.length > 200 ? 1.6 : 2.6 }, svg);
+      el('title', {}, c, hhmm(x[0]) + ' · counter ' + x[1].toLocaleString() + (i ? ' (+' + Math.max(0, x[1] - s[i - 1][1]) + ')' : ''));
+    });
+  } else el('text', { x: 240, y: 80, 'text-anchor': 'middle' }, svg, 'no reports in this period');
+  const gaps = []; for (let i = 1; i < s.length; i++) gaps.push((s[i][0] - s[i - 1][0]) / 60);
+  const typical = gaps.length ? gaps.slice().sort((a, b) => a - b)[Math.floor(gaps.length / 2)] : null;
+  $('repNote').textContent = s.length + ' reports' + (typical ? ' · usually every ' + typical.toFixed(1) + ' min' : '') + (longest ? ' · longest silence ' + Math.round(longest) + ' min' : '');
+  const body = $('recent'); body.textContent = '';
+  s.slice(-8).reverse().forEach((x, k, arr) => {
+    const idx = s.length - 1 - k, prev = idx ? s[idx - 1] : null, tr = document.createElement('tr');
+    const c = (t, cls) => { const td = document.createElement('td'); if (cls) td.className = cls; td.textContent = t; tr.appendChild(td); };
+    c(hhmm(x[0])); c(x[1].toLocaleString(), 'n');
+    c(prev ? (x[1] >= prev[1] ? '+' + (x[1] - prev[1]) : 'phone restarted') : '–', 'n');
+    c(prev ? Math.round((x[0] - prev[0]) / 60 * 10) / 10 + ' min' : '–', 'n');
+    body.appendChild(tr);
+  });
+}
+async function loadSamples() {
+  try { const j = await api('/api/samples?hours=' + range); drawRate(j); drawReports(j); } catch (e) { if (e.message !== 'token') msg('Cannot load reports: ' + e.message, 'err'); }
+}
+document.querySelectorAll('#rng button').forEach(b => b.onclick = () => {
+  range = Number(b.dataset.h);
+  document.querySelectorAll('#rng button').forEach(x => x.classList.toggle('on', x === b));
+  loadSamples();
+});
+
 async function snooze(min, kind) {
   try { await api('/snooze?min=' + min + '&kind=' + kind, { method: 'POST' }); refresh(); } catch (e) { msg(e.message, 'err'); }
 }
 async function refresh() {
-  try { render(await api('/api/state')); } catch (e) { if (e.message !== 'token') msg('Cannot reach the service: ' + e.message, 'err'); }
+  try { render(await api('/api/state')); await loadSamples(); } catch (e) { if (e.message !== 'token') msg('Cannot reach the service: ' + e.message, 'err'); }
 }
 function start() {
   $('login').classList.add('hidden'); $('app').classList.remove('hidden');
