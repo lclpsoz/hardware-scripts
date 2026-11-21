@@ -26,6 +26,7 @@ Endpoints (token in header X-Token or ?t=):
   POST /api/test              {"type": "level2"|"moved"|...} send that notification
   POST /api/debug/steps       {"n": N} fake report with the counter raised by N (hollow dot)
   POST /api/debug/sitting     {"min": M} pretend you have been sitting M minutes
+  POST /api/debug/dismiss     the phone dismisses its Clock timers at the next report
   POST /api/debug/alarm       {"level": 3} play that level's phone alarm once, at the next report
   GET  /health                no token
 """
@@ -99,9 +100,10 @@ DEFAULTS = {
     # snooze buttons: [minutes, offered only while sitting under this many minutes (0 = always)]
     "snooze_opts": [[30, 90], [5, 110], [1, 0]],
     "phone_alarm": True,                # master switch for the phone alarms of the levels
-    "alarm_ring_s": 900,                # how long a Clock timer rings before it stops by itself: no new one starts sooner
+    "alarm_ring_s": 600,                # how long a Clock timer rings before it stops by itself (Clock app: 10 min): no new one starts sooner
     "loud_limit_min": 30,               # level 4 stays loud this long (0 = no limit), then only the quiet notification
-    "backoff_max_s": 900,               # level 4 repeats double each time, up to this many seconds
+    "backoff_max_s": 900,               # level 4 phone alarms double their wait each time, up to this many seconds
+    "notif_backoff_max_s": 120,         # level 4 notifications double their wait each time, up to this many seconds
     "alarm_package": "",                # Clock app that gets the timer request (blank = the phone's choice), e.g. com.google.android.deskclock
     "notif": NOTIF_DEFAULTS,
     "report_idle_s": int(E("REPORT_IDLE_S", "60")),     # how often the phone should report normally
@@ -114,6 +116,7 @@ SET = copy.deepcopy(DEFAULTS)
 lock = threading.Lock()
 S = {"last_move": time.time(), "snooze_start": 0.0, "snooze_until": 0.0, "snooze_kind": "", "last_sample": 0.0, "walk_until": 0.0, "stats_flush": 0.0, "alarm_test": 0, "last_alarm": 0.0, "last_alarm_level": 0,
      "l4_since": 0.0, "l4_repeat": 0, "l4_alarm_repeat": 0, "quiet_phase": False,
+     "timers_out": False, "dismiss": False,
      "stale_told": False, "level_sent": 0, "last_repeat": 0.0, "steps": None, "started": time.time()}
 samples = deque()
 stats = {}            # "YYYY-MM-DD" -> day record
@@ -282,6 +285,7 @@ def validate(d):
     num("alarm_ring_s", 10, 1800)
     num("loud_limit_min", 0, 1440)
     num("backoff_max_s", 20, 3600)
+    num("notif_backoff_max_s", 20, 3600)
     num("report_idle_s", 5, 600)
     num("report_walk_s", 2, 120)
     num("walk_spm", 5, 200)
@@ -451,6 +455,7 @@ def alarm_due(now):
     A new level sounds at once; the same level repeats after its alarm_repeat_s."""
     test, S["alarm_test"] = S["alarm_test"], 0              # a Test button or debug call plays once
     if test:
+        S["timers_out"] = True
         return test
     if alarm_active(now):
         lvl = S["level_sent"]
@@ -462,6 +467,7 @@ def alarm_due(now):
             return 0                                  # the previous timer may still be ringing, whatever the level
         if lvl != S["last_alarm_level"] or now - S["last_alarm"] >= gap:
             S["last_alarm"], S["last_alarm_level"] = now, lvl
+            S["timers_out"] = True
             if lvl == 4:                              # back off: each alarm waits twice as long as the last
                 S["l4_alarm_repeat"] = max(base, min(gap * 2, SET["backoff_max_s"]))
             return lvl
@@ -470,6 +476,7 @@ def alarm_due(now):
 
 def begin_snooze(minutes, kind, t):
     """Start (or replace) a snooze. It pauses the sitting timer; extending keeps the original start."""
+    want_dismiss()
     if not (S["snooze_until"] and t < S["snooze_until"]):
         S["snooze_start"] = t
     S["snooze_until"], S["snooze_kind"] = t + minutes * 60, kind
@@ -493,7 +500,14 @@ def in_quiet(t):
         return False
 
 
+def want_dismiss():
+    """Timers were started on the phone and are no longer wanted: ask the phone to dismiss them at its next report."""
+    if S["timers_out"]:
+        S["dismiss"], S["timers_out"] = True, False
+
+
 def reset(t, why):
+    want_dismiss()
     S["last_move"] = t
     S["level_sent"] = 0
     S["last_repeat"] = 0.0
@@ -578,6 +592,7 @@ def tick():
             send("snooze_end")
             return
         if not SET["enabled"] or in_quiet(t):
+            want_dismiss()
             S["last_move"] = t
             S["level_sent"] = 0
             return
@@ -623,7 +638,7 @@ def tick():
             elif S["l4_repeat"] and t - S["last_repeat"] >= S["l4_repeat"]:
                 S["last_repeat"] = t
                 send("level4", min=int(mins))
-                S["l4_repeat"] = min(S["l4_repeat"] * 2, max(SET["backoff_max_s"], cfg["repeat_s"]))
+                S["l4_repeat"] = min(S["l4_repeat"] * 2, max(SET["notif_backoff_max_s"], cfg["repeat_s"]))
         elif cfg["repeat_s"] and t - S["last_repeat"] >= cfg["repeat_s"]:
             S["last_repeat"] = t
             send(f"level{lvl}", min=int(mins))
@@ -717,11 +732,12 @@ class H(BaseHTTPRequestHandler):
                     now = time.time()
                     due = alarm_due(now)
                     nxt = min(nxt, next_report_s(now))            # fast reports as the alarm levels near
-                out = {"ok": True, "next_s": nxt, "alarm": int(bool(due))}
+                out = {"ok": True, "next_s": nxt, "alarm": int(bool(due)), "pkg": SET["alarm_package"]}
+                if S["dismiss"]:
+                    out["dismiss"], S["dismiss"] = 1, False       # once: the phone dismisses the timers we started
                 if due:
                     cfg = SET["notif"][f"level{due}"]
-                    out.update(level=due, mode=cfg["alarm_mode"], say=alarm_label(due), vol=cfg["alarm_volume"],
-                               pkg=SET["alarm_package"])
+                    out.update(level=due, mode=cfg["alarm_mode"], say=alarm_label(due), vol=cfg["alarm_volume"])
                 return self.reply(200, out)
             if u.path == "/snooze":
                 m = int((q.get("min") or [0])[0])
@@ -784,6 +800,11 @@ class H(BaseHTTPRequestHandler):
                     S["level_sent"], S["last_repeat"] = 0, 0.0
                     save_state()
                 log("debug: sitting timer set to", m, "min")
+                return self.reply(200, {"ok": True})
+            if u.path == "/api/debug/dismiss" and self.command == "POST":
+                with lock:
+                    S["dismiss"] = True
+                log("debug: the phone will dismiss its timers at the next report")
                 return self.reply(200, {"ok": True})
             if u.path == "/api/debug/alarm" and self.command == "POST":
                 lvl = int(self.body_json().get("level", 4))

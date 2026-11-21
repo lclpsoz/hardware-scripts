@@ -11,6 +11,14 @@
 LOG=~/steps-loop.log
 log() { echo "$(date +%H:%M:%S) $*" >> "$LOG"; }
 
+dismiss_timers() {
+  # $1 = Clock app package. Dismisses the ringing timers (and clears the stopped ones from the list).
+  # Without a package Android asks which Clock app to use, so it is skipped then.
+  if [ -z "$1" ]; then log "dismiss skipped: no Clock app set on the page"; return; fi
+  timeout 15 am start -p "$1" -a android.intent.action.DISMISS_TIMER >> "$LOG" 2>&1
+  log "dismiss timers (app: $1) rc=$?"
+}
+
 alarm() {
   # $1 = phrase, $2 = volume in percent of the alarm stream's maximum, $3 = "timer" or "speech",
   # $4 = Clock app package for the timer (empty = the phone's choice)
@@ -30,6 +38,8 @@ alarm() {
     timeout 25 termux-tts-speak -s ALARM "$say" >> "$LOG" 2>&1
     log "tts rc=$? (124 = timed out)"
   else
+    # Clear the previous timers first so they never pile up (needs the Clock app set on the page).
+    if [ -n "$pk" ]; then dismiss_timers "$pk"; sleep 1; fi
     # A 1-second timer in the Clock app, labelled with the phrase. Rings like any timer.
     # Needs Termux to have "Display over other apps" (Android blocks starting it from the background).
     if [ -n "$pk" ]; then
@@ -53,12 +63,14 @@ while true; do
     log "steps=$n reply=$reply"
     w=$(printf '%s' "$reply" | grep -oE '"next_s": *[0-9]+' | grep -oE '[0-9]+$')
     [ -n "$w" ] && wait=$w
+    pk=$(printf '%s' "$reply" | grep -oE '"pkg": *"[^"]*"' | sed 's/^"pkg": *"//; s/"$//')
     if printf '%s' "$reply" | grep -qE '"alarm": *1'; then
       say=$(printf '%s' "$reply" | grep -oE '"say": *"[^"]*"' | sed 's/^"say": *"//; s/"$//')
       pct=$(printf '%s' "$reply" | grep -oE '"vol": *[0-9]+' | grep -oE '[0-9]+$')
       mode=$(printf '%s' "$reply" | grep -oE '"mode": *"[a-z]+"' | grep -oE '[a-z]+"$' | tr -d '"')
-      pk=$(printf '%s' "$reply" | grep -oE '"pkg": *"[^"]*"' | sed 's/^"pkg": *"//; s/"$//')
       alarm "$say" "$pct" "$mode" "$pk"
+    elif printf '%s' "$reply" | grep -qE '"dismiss": *1'; then
+      dismiss_timers "$pk"
     fi
   else
     log "no step counter value (termux-sensor gave: $out)"

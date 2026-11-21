@@ -51,7 +51,7 @@ Shows the sitting timer with the reminder levels, the mode (watching, snoozed, q
 
 ## Endpoints
 
-Token in `X-Token` or `?t=`. `/steps?steps=N`, `POST /snooze?min=5` (only lengths offered right now), `/resume`, `/status`, `/api/state`, `POST /api/settings`, `POST /api/test` (JSON `{"type": "level2"}`), `POST /api/debug/steps`, `POST /api/debug/sitting` and `POST /api/debug/alarm` (JSON `{"n": N}` and `{"min": M}`); `/`, `/health` and `/phone.sh` need no token.
+Token in `X-Token` or `?t=`. `/steps?steps=N`, `POST /snooze?min=5` (only lengths offered right now), `/resume`, `/status`, `/api/state`, `POST /api/settings`, `POST /api/test` (JSON `{"type": "level2"}`), `POST /api/debug/steps`, `POST /api/debug/sitting`, `POST /api/debug/dismiss` and `POST /api/debug/alarm` (JSON `{"n": N}` and `{"min": M}`); `/`, `/health` and `/phone.sh` need no token.
 
 ## Phone setup
 
@@ -69,13 +69,14 @@ The loop writes what it does to `~/steps-loop.log` on the phone (kept under abou
 
 ## Long periods (phone left at home)
 
-If nobody moves for hours, level 4 would repeat forever (with the first settings: 180 ntfy sounds and about 54 timers per hour, about 1,400 notifications and 420 timers over a 9-hour day). Three rules prevent it (settings on the page):
+If nobody moves for hours, level 4 would repeat forever (with the first settings: 180 ntfy sounds and about 54 timers per hour, about 1,400 notifications and 420 timers over a 9-hour day). The rules below prevent it (settings on the page):
 
-- **A new Clock timer never starts sooner than the previous one needs to finish ringing, whatever the level** (*A Clock timer rings for about*, default 900 s; the owner's timers were still going after 7 minutes, so this is a safe upper bound until measured): a timer keeps counting past zero and ringing until it stops by itself, and each request makes a new timer.
-- **Level 4 backs off**: each repeat of the notification and of the timer waits twice as long as the last, up to *Repeat waits grow up to* (default 900 s).
-- **Level 4 stays loud for 30 minutes** (*Level 4 stays loud for*, 0 = no limit). After that the phone alarms and the loud notifications stop, and only the quiet *Still sitting* notification (priority 2, every 15 min, editable under Notifications) repeats until you move. Moving enough and then sitting again re-arms everything.
+- **A Clock timer keeps ringing until the Clock app stops it** (the owner's Clock app: 10 minutes, a setting inside the Clock app that the Pi cannot change), and every timer request makes a new timer, so they pile up. Hence a new timer never starts sooner than *A Clock timer rings for about* (default 600 s) after the previous one, whatever the level.
+- **Timers are dismissed** from the phone so they cannot pile up: the loop runs `am start -p <clock app> -a android.intent.action.DISMISS_TIMER` before starting a new timer, and the Pi asks it to dismiss them (once, in its reply to the next report) when you walk enough, press a snooze, quiet hours begin, or you press the debug button. This needs *Clock app for the timers* set on the page (verified with `com.google.android.deskclock`): without a package name Android asks which Clock app to use, so dismissal is skipped.
+- **Level 4 backs off**: each repeat waits twice as long as the last, notifications up to *Notification waits grow up to* (default 120 s) and phone alarms up to *Alarm waits grow up to* (default 900 s).
+- **Level 4 stays loud for 30 minutes** (*Level 4 stays loud for*, 0 = no limit). After that the phone alarms and loud notifications stop, and only the quiet *Still sitting* notification (priority 2, every 15 min, editable under Notifications) repeats until you move. Moving enough and then sitting again re-arms everything.
 
-Simulated with a fake clock and the owner's settings, a 9-hour day away gives 15 loud notifications (levels 1-4), 29 quiet ones and 3 timers (one at level 3, two at level 4, at least 15 minutes apart), instead of about 1,390 notifications and 420 timers. The loud phase restarts if the `steps` container is restarted.
+Simulated with a fake clock and the owner's settings, a 9-hour day away gives 25 loud notifications (8 from levels 1-3 and 17 in the 30 loud minutes of level 4), 29 quiet ones and 3 timers (one at level 3, two at level 4, at least 10 minutes apart), instead of about 1,390 notifications and 420 timers. The loud phase restarts if the `steps` container is restarted.
 
 ## Lock screen
 
