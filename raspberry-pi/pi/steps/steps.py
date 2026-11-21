@@ -144,6 +144,8 @@ def load():
         for x in rp:
             if isinstance(x, list) and len(x) == 2 and x[0] >= cut:
                 reports.append(x)
+        if reports:                      # a restart must not make the phone look silent
+            S["last_sample"], S["steps"] = float(reports[-1][0]), reports[-1][1]
     st = read_json("stats.json")
     if isinstance(st, dict):
         stats.update(st)
