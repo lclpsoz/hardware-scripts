@@ -43,7 +43,7 @@ PORT = int(E("STEPS_PORT", "8097"))
 PUBLIC = E("STEPS_PUBLIC_URL", "http://192.168.0.250:8097")  # used by the snooze buttons
 DATA = E("DATA_DIR", "/data")
 UI_FILE = E("UI_FILE", "/app/ui.html")
-KEEP_DAYS = 30
+KEEP_DAYS = 365
 KEEP_REPORTS_H = 24
 
 
@@ -74,8 +74,8 @@ S = {"last_move": time.time(), "snooze_until": 0.0, "snooze_kind": "", "last_sam
 samples = deque()
 stats = {}            # "YYYY-MM-DD" -> day record
 stats_dirty = False
-reports = deque()     # [unix time, counter value] of every phone report, last 24 h
-reports_dirty = False
+reports = deque()     # [unix time, counter value(, 1 if added by hand)] of every phone report, last 24 h
+appended = 0          # lines appended to reports.jsonl since it was last rewritten compactly
 
 
 def log(*a):
@@ -89,6 +89,8 @@ def write_json(name, obj):
         tmp = path + ".tmp"
         with open(tmp, "w") as f:
             json.dump(obj, f)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
     except OSError as e:
         log("not saved:", name, e)
@@ -112,11 +114,37 @@ def save_settings():
     write_json("settings.json", SET)
 
 
+def append_report(rec):
+    """One line per report, flushed to disk at once: a crash or power cut loses nothing."""
+    global appended
+    try:
+        with open(os.path.join(DATA, "reports.jsonl"), "a") as f:
+            f.write(json.dumps(rec) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        appended += 1
+    except OSError as e:
+        log("report not saved:", e)
+
+
+def compact_reports():
+    """Rewrite reports.jsonl with only the reports still kept (last 24 h)."""
+    global appended
+    path = os.path.join(DATA, "reports.jsonl")
+    try:
+        with open(path + ".tmp", "w") as f:
+            for r in reports:
+                f.write(json.dumps(r) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(path + ".tmp", path)
+        appended = 0
+    except OSError as e:
+        log("reports not compacted:", e)
+
+
 def flush_stats(force=False):
-    global stats_dirty, reports_dirty
-    if reports_dirty or force:
-        write_json("reports.json", list(reports))
-        reports_dirty = False
+    global stats_dirty
     if stats_dirty or force:
         cutoff = time.strftime("%Y-%m-%d", time.localtime(time.time() - KEEP_DAYS * 86400))
         for k in [k for k in stats if k < cutoff]:
@@ -138,14 +166,25 @@ def load():
     if isinstance(lm, (int, float)) and 0 < t - lm <= SET["stale_min"] * 60:
         S["last_move"] = lm
         log("sitting timer restored:", round((t - lm) / 60, 1), "min")
-    rp = read_json("reports.json")
-    if isinstance(rp, list):
-        cut = time.time() - KEEP_REPORTS_H * 3600
-        for x in rp:
-            if isinstance(x, list) and len(x) == 2 and x[0] >= cut:
-                reports.append(x)
-        if reports:                      # a restart must not make the phone look silent
-            S["last_sample"], S["steps"] = float(reports[-1][0]), reports[-1][1]
+    rp = []
+    try:
+        with open(os.path.join(DATA, "reports.jsonl")) as f:
+            for line in f:
+                try:
+                    rp.append(json.loads(line))
+                except ValueError:
+                    pass                  # a half-written last line after a power cut
+    except OSError:
+        rp = read_json("reports.json") or []   # older format
+    cut = time.time() - KEEP_REPORTS_H * 3600
+    good = sorted((x for x in rp if isinstance(x, list) and len(x) in (2, 3) and x[0] >= cut),
+                  key=lambda x: x[0])
+    reports.extend(good)
+    if reports:
+        compact_reports()
+    real = [x for x in reports if len(x) == 2]       # reports added by hand do not count as the phone
+    if real:                                          # a restart must not make the phone look silent
+        S["last_sample"], S["steps"] = float(real[-1][0]), real[-1][1]
     st = read_json("stats.json")
     if isinstance(st, dict):
         stats.update(st)
@@ -258,13 +297,14 @@ def reset(t, why):
 
 
 def add_sample(n):
-    global reports_dirty
     t = time.time()
     with lock:
         reports.append([int(t), n])
+        append_report(reports[-1])
         while reports and reports[0][0] < t - KEEP_REPORTS_H * 3600:
             reports.popleft()
-        reports_dirty = True
+        if appended >= 720:
+            compact_reports()
         prev = samples[-1][1] if samples else S["steps"]
         if samples and n < samples[-1][1]:       # phone rebooted: counter restarted
             samples.clear()
@@ -418,6 +458,8 @@ class H(BaseHTTPRequestHandler):
         try:
             if u.path == "/steps":
                 add_sample(int(float(q["steps"][0])))
+                with lock:
+                    flush_stats()
                 return self.reply(200, {"ok": True})
             if u.path == "/snooze":
                 m = max(1, min(600, int((q.get("min") or [SET["meeting_min"]])[0])))

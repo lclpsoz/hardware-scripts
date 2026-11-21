@@ -7,7 +7,7 @@
 # contains private data: Pi-hole history, NetAlertX device list, TLS keys, password hashes).
 #
 # What is saved (streamed over ssh, so nothing large lands on the SD card):
-#   pi-home.tar.gz           compose projects (pihole, netalertx, beszel, proxy, netq) with their data,
+#   pi-home.tar.gz           compose projects (pihole, netalertx, beszel, proxy, netq, steps) with their data,
 #                            plus ~/.ssh/authorized_keys and shell files. Pi-hole's databases are
 #                            consistent SQLite snapshots (etc-pihole/.bk/), not live files.
 #   beszel.tar.gz            Beszel hub data and keys (root-owned; live copy, restart-safe)
@@ -48,7 +48,7 @@ lo "tar czf - -C /home/lclpsoz \
   --exclude=pihole/etc-pihole/gravity.db --exclude=pihole/etc-pihole/gravity_old.db \
   --exclude=pihole/etc-pihole/pihole-FTL.db --exclude=pihole/etc-pihole/pihole-FTL.db-shm \
   --exclude=pihole/etc-pihole/pihole-FTL.db-wal --exclude=pihole/etc-pihole/listsCache \
-  pihole netalertx beszel/docker-compose.yml proxy netq dnsproxy ntfy alerts ops-state .ssh/authorized_keys .bashrc .profile" > "$DEST/pi-home.tar.gz"
+  pihole netalertx beszel/docker-compose.yml proxy netq dnsproxy ntfy alerts steps ops-state .ssh/authorized_keys .bashrc .profile" > "$DEST/pi-home.tar.gz"
 cleanup
 
 echo "-- 3/6 Beszel data (root-owned, read through a container) and the NetAlertX volume"

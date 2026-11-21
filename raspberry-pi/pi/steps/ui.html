@@ -65,6 +65,7 @@
   svg .gap { fill: var(--bad); opacity: .14; }
   svg .ln { stroke: var(--accent); fill: none; stroke-width: 1.5; stroke-linejoin: round; }
   svg .dt { fill: var(--accent); }
+  svg .man { fill: var(--card); stroke: var(--accent); stroke-width: 1.4; }
   svg .hi { fill: var(--ok); }
   svg .lo { fill: var(--accent); opacity: .75; }
   svg text.warn { fill: var(--warn); paint-order: stroke; stroke: var(--card); stroke-width: 3px; }
@@ -142,7 +143,7 @@
     <h2>When the phone reported</h2>
     <div class="card">
       <svg id="rep" viewBox="0 0 480 160" width="100%" role="img" aria-label="Phone reports and step counter values"></svg>
-      <div class="legend"><span><i class="sw" style="background:var(--accent)"></i>one dot per report (the line is the phone's step counter)</span><span><i class="sw" style="background:var(--bad);opacity:.3"></i>no reports</span></div>
+      <div class="legend"><span><i class="sw" style="background:var(--accent)"></i>one dot per report (the line is the phone's step counter)</span><span><i class="sw" style="border:2px solid var(--accent);background:none"></i>added by hand</span><span><i class="sw" style="background:var(--bad);opacity:.3"></i>no reports</span></div>
       <div class="hint" id="repNote"></div>
       <div class="scroll" style="margin-top:8px"><table>
         <thead><tr><th>Time</th><th class="n">Counter</th><th class="n">Steps since</th><th class="n">After</th></tr></thead>
@@ -372,8 +373,8 @@ function drawReports(j) {
   if (s.length) {
     el('polyline', { class: 'ln', points: s.map(x => X(x[0]).toFixed(1) + ',' + Y(x[1]).toFixed(1)).join(' ') }, svg);
     s.forEach((x, i) => {
-      const c = el('circle', { class: 'dt', cx: X(x[0]), cy: Y(x[1]), r: s.length > 200 ? 1.6 : 2.6 }, svg);
-      el('title', {}, c, hhmm(x[0]) + ' · counter ' + x[1].toLocaleString() + (i ? ' (+' + Math.max(0, x[1] - s[i - 1][1]) + ')' : ''));
+      const c = el('circle', { class: x[2] ? 'dt man' : 'dt', cx: X(x[0]), cy: Y(x[1]), r: s.length > 200 ? 1.6 : 2.6 }, svg);
+      el('title', {}, c, hhmm(x[0]) + ' · counter ' + x[1].toLocaleString() + (i ? ' (+' + Math.max(0, x[1] - s[i - 1][1]) + ')' : '') + (x[2] ? ' (added by hand)' : ''));
     });
   } else el('text', { x: 240, y: 80, 'text-anchor': 'middle' }, svg, 'no reports in this period');
   const gaps = []; for (let i = 1; i < s.length; i++) gaps.push((s[i][0] - s[i - 1][0]) / 60);
@@ -383,7 +384,7 @@ function drawReports(j) {
   s.slice(-8).reverse().forEach((x, k, arr) => {
     const idx = s.length - 1 - k, prev = idx ? s[idx - 1] : null, tr = document.createElement('tr');
     const c = (t, cls) => { const td = document.createElement('td'); if (cls) td.className = cls; td.textContent = t; tr.appendChild(td); };
-    c(hhmm(x[0])); c(x[1].toLocaleString(), 'n');
+    c(hhmm(x[0]) + (x[2] ? ' (by hand)' : '')); c(x[1].toLocaleString(), 'n');
     c(prev ? (x[1] >= prev[1] ? '+' + (x[1] - prev[1]) : 'phone restarted') : '–', 'n');
     c(prev ? Math.round((x[0] - prev[0]) / 60 * 10) / 10 + ' min' : '–', 'n');
     body.appendChild(tr);

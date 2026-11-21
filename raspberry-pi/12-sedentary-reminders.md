@@ -17,9 +17,9 @@ All numbers are settings. They start from the optional values in `~/steps/config
 Shows the sitting timer with the reminder levels, the mode (watching, snoozed, quiet hours, no phone data), Meeting / Nap / Pause buttons, today's steps, reminders, longest sitting and how many times you got up, steps per hour, the last 14 days, and every setting (levels, repeat interval, step threshold and window, quiet hours, snooze lengths, on/off, a test notification).
 
 - The page asks for the `STEPS_TOKEN` once and keeps it in the browser. The settings are saved in `~/steps/data/settings.json` and apply at once.
-- Stats are kept for 30 days in `~/steps/data/stats.json`, written every 15 minutes (and on stop), so the SD card sees few writes. A restart loses at most 15 minutes of stats.
+- Stats are kept for a year in `~/steps/data/stats.json` and written at every phone report (and every 15 minutes).
 - **Phone data** (3 h / 12 h / 24 h switch): *Steps per minute* shows the walking rate between consecutive reports against the moving rate (green bars count as moving), and *When the phone reported* plots one dot per report with the step counter value, red bands where reports were missing for 6 min or more, and a table of the last 8 reports. A counter that drops means the phone restarted.
-- Every report (time and counter value) is kept for 24 hours in `~/steps/data/reports.json`, written every 15 minutes and on stop (about 12 KB). The sitting timer is also saved there (`state.json`), so a restart keeps it unless it is older than the phone-silent limit.
+- Every report (time and counter value) is kept for 24 hours in `~/steps/data/reports.jsonl`: one line per report, flushed to disk as it arrives, so a crash or power cut loses nothing (tested with `kill -9` and a half-written last line). A third value `1` marks a point added by hand; it is drawn as a hollow dot and never counts as the phone reporting. The sitting timer is kept in `state.json` and restored on start unless it is older than the phone-silent limit.
 - The card on [home.lan](http://home.lan) shows whether it answers.
 
 ## Files
@@ -42,6 +42,12 @@ Token in `X-Token` or `?t=`. `/steps?steps=N`, `/snooze?min=60&kind=meeting|nap`
 2. Install Termux and Termux:API, run `pkg install termux-api curl`, and put `PI=http://192.168.0.250:8097` and `TOKEN=...` in `~/.steps-env`.
 3. Check `termux-sensor -l` lists a step counter and that `bash steps-report.sh` makes `/status` show your steps. Verified on the owner's phone (a Samsung): the sensor is called `Step Counter` and a read takes about 2 s.
 4. Schedule it every 2 minutes and exempt Termux from battery optimisation.
+
+## Backup and durability
+
+- The laptop's daily backup ([scripts/backup-pi.sh](scripts/backup-pi.sh), run by the `pi-backup` timer) includes `~/steps`: the code, `config.env` (the secrets, so keep the backup folder private) and all the data. Restore: copy the folder back to `~` on the Pi and run `docker compose up -d`.
+- At most one day of data is lost if the SD card dies, nothing if only the container or the Pi restarts or loses power.
+- The first start after a restart takes about 45 seconds (0.15 CPU on a 600 MHz Pi), and phone reports sent in that window are refused. The Termux script sends the next one 2 minutes later.
 
 ## Limits
 
