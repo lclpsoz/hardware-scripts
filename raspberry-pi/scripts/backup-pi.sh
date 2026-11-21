@@ -48,7 +48,7 @@ lo "tar czf - -C /home/lclpsoz \
   --exclude=pihole/etc-pihole/gravity.db --exclude=pihole/etc-pihole/gravity_old.db \
   --exclude=pihole/etc-pihole/pihole-FTL.db --exclude=pihole/etc-pihole/pihole-FTL.db-shm \
   --exclude=pihole/etc-pihole/pihole-FTL.db-wal --exclude=pihole/etc-pihole/listsCache \
-  pihole netalertx beszel/docker-compose.yml proxy netq .ssh/authorized_keys .bashrc .profile" > "$DEST/pi-home.tar.gz"
+  pihole netalertx beszel/docker-compose.yml proxy netq dnsproxy .ssh/authorized_keys .bashrc .profile" > "$DEST/pi-home.tar.gz"
 cleanup
 
 echo "-- 3/6 Beszel data (root-owned, read through a container) and the NetAlertX volume"
