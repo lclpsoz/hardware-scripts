@@ -10,7 +10,9 @@ Running since 2026-11-20 21:06 at **http://net.lan**. It records how the interne
 | 1 min | Ping to the **ISP gateway** (100.66.64.1, Claro's first hop) | The fibre and access network |
 | 1 min | Ping to **Cloudflare** (1.1.1.1) and **Google** (8.8.8.8) | The path to the wider internet |
 | 1 min | DNS through **Pi-hole** (a popular, usually cached name) | Whether Pi-hole answers fast |
-| 1 min | DNS straight to Cloudflare and Google (a new random name each time) | How fast each upstream does a full lookup |
+| 1 min | DNS through **Pi-hole** with a new random name each time | The full path: Pi-hole, then the forwarder, then the internet |
+| 1 min | DNS to the **encrypted forwarder** (dnsproxy on 127.0.0.1:5053, new random name each time) | Whether the DNS-over-TLS path works and how fast it is |
+| 1 min | DNS straight to Cloudflare and Google over plain UDP (a new random name each time) | A control: how fast each upstream is without the forwarder |
 | 5 min | HTTPS to Cloudflare: TCP connect, TLS handshake, first byte | Real connection set-up time, including the Pi's own TLS work |
 | 6 h, or the button | Speed test: 10 MB download and 2 MB upload from Cloudflare, with ping measured during the download | Throughput and latency under load ("bufferbloat") |
 
@@ -49,7 +51,7 @@ Google takes about 4 times as long as Cloudflare for a new name from here. That 
 | CPU | under 1% on average. The speed test is a short burst, allowed up to 1 core. |
 | SD card | Samples stay in RAM and are written every 5 minutes, about 10 rows a minute. The database stays in the low tens of MB at 60 days. |
 | Network | about 1 KB a minute for the probes, plus the speed tests above |
-| Pi-hole log | One query a minute from 127.0.0.1 (the Pi-hole probe) |
+| Pi-hole log | Two queries a minute from 127.0.0.1 (the cached-name and new-name probes) |
 
 ## Operations
 
@@ -63,3 +65,14 @@ ssh pi 'cd ~/netq && docker compose restart'              # restart (samples are
 Change targets or intervals with the `NETQ_*` variables in the compose file, then run `docker compose up -d`. To test the page without a network, run it on a laptop: `NETQ_DB=/tmp/netq.db NETQ_PORT=18098 python3 netq.py --demo` writes 7 days of synthetic data.
 
 The container only listens on 127.0.0.1:8098, so it is reachable through `net.lan` and nothing else. It has no `docker exec` healthcheck, which would cause periodic CPU spikes.
+
+## Update 2026-11-21: probes for the encrypted DNS
+
+Since Pi-hole forwards to dnsproxy ([09](09-encrypted-dns.md)), the page measures that path too:
+
+- **New tile** "Encrypted DNS" (median and failure share, last 15 minutes) and two DNS charts: *your network* (Pi-hole with a cached name, Pi-hole with a new name, the forwarder) and *direct, unencrypted (control)* (Cloudflare, Google). Reading them: if the forwarder slows while the control stays flat, suspect dnsproxy or the TLS path; if all rise together, it's the ISP line.
+- **Status:** failures above 10% on any of the three Pi-hole-side probes now turn the status to "Packet loss or DNS failures".
+- **Marker:** the change to encrypted upstream happened 2026-11-20 22:07. Earlier DNS history is the plain-UDP era; compare the weeks before and after.
+- **Not included:** Pi-hole's "maximum concurrent queries" warnings. They need the Pi-hole API, which requires a password or app password, and netq has none. Read them with `docker exec pihole grep -c "Maximum number" /var/log/pihole/FTL.log` or in Pi-hole's Diagnosis page.
+- **Cost:** two more small DNS probes a minute, about 19 MB of RAM for netq in total. Existing history is kept.
+- **Palette:** the new line colors passed `validate_palette.js` in light and dark.
