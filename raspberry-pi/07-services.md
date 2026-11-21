@@ -45,3 +45,26 @@ cd ~/proxy && docker compose down                      # frees port 80
 cd ~/pihole && cp docker-compose.yml.bak-2026-11-20 docker-compose.yml && docker compose up -d   # Pi-hole back on 80/443
 docker exec pihole pihole-FTL --config dns.hosts '[]'  # remove the names
 ```
+
+## HTTPS for the `.lan` names
+
+**Now:** the `.lan` names use plain HTTP on port 80. Pi-hole also serves HTTPS itself on 8443 (`https://192.168.0.250:8443/admin`), with a certificate it created for itself. Browsers warn about it because nothing trusts the certificate yet.
+
+**What HTTPS would protect:** the Pi-hole admin password and session, sent over Wi-Fi or Ethernet. On a home network the risk is small (someone on your Wi-Fi sniffing traffic), but the Pi-hole password also unlocks DNS control.
+
+| Option | Warning in browsers? | Effort | Notes |
+| --- | --- | --- | --- |
+| A. Use Pi-hole's own `:8443` | Yes, until you trust its CA (`tls_ca.crt` in `~/pihole/etc-pihole/`) on each device | None | Works today. The name must match the certificate, so use the address or name it was made for. |
+| B. nginx serves HTTPS for all `.lan` names, with a small local CA | No, once the CA is installed on each device | Medium: make a CA and one certificate, add `listen 443 ssl` blocks, install the CA on laptops and phones | One CA covers every service, including NetAlertX and net.lan. |
+| C. A real certificate (Let's Encrypt) | No | Needs a public domain name you own (about 10 USD a year) and a DNS-based challenge; `.lan` names cannot get one | Clean, but the most moving parts. |
+| D. Tailscale's certificates | No | Comes with the Tailscale idea in [06-ideas.md](06-ideas.md) | Real, trusted certificates for the Pi's `*.ts.net` name, no CA to install. Works for remote access too. |
+
+**Downsides of any of them:**
+
+- **Trust installation** on every device (A and B). Android and Chrome honor a user-installed CA; Firefox on desktop has its own store; on iPhones the CA needs an extra "full trust" switch. Some apps ignore user CAs.
+- **Certificates expire.** A local CA can last 10 years, but the server certificate should be renewed every year or two, which is one more chore.
+- **Scripts and bookmarks** that use `http://pihole.lan` need updating, unless HTTP stays open next to HTTPS.
+- **A bit more CPU** on every new connection. On this Pi it is a few tens of milliseconds, not noticeable.
+- **A mistake can lock you out of the UI**, though the Pi-hole admin is always still reachable on `http://192.168.0.250:8080/admin` while that port stays open.
+
+**Suggestion:** B, because one local CA covers everything and keeps the names. If you plan to use Tailscale anyway, D is simpler and cleaner. Waiting on your choice ([PENDING.md](PENDING.md)).

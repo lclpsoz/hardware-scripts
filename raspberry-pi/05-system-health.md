@@ -134,3 +134,42 @@ Re-check in a few days: `pi-checkup.sh` prints MiB/day since boot.
 | Boot files | `kernel8.img` matches the package checksum, and `initramfs8` is identical to its source, so the next boot is safe from that side |
 | Reboot | **Pending.** The new kernel 6.18.60 is installed, and 6.18.50 is running. Best done once, after the power supply arrives, together with the HDMI line above. |
 | Memory and CPU now | 506 MiB available, swap 58 MiB used, load back below 1 |
+
+## How to turn off SSH password login
+
+**Why:** SSH on the Pi accepts both keys and passwords (a login attempt without a key is told `publickey,password`). Your key already works, so the password is only an extra way in for anyone on the LAN who guesses it. Turning it off leaves keys only.
+
+**Commands (run on the Pi, in a session you keep open):**
+
+```bash
+echo 'PasswordAuthentication no' | sudo tee /etc/ssh/sshd_config.d/10-no-password.conf
+sudo sshd -t && sudo systemctl reload ssh      # -t checks the syntax first
+```
+
+The `10-` prefix matters: sshd uses the first value it reads, and files in that folder are read in name order, so this one wins over anything cloud-init adds later.
+
+**Test from the laptop in a new terminal, before closing the old session:**
+
+```bash
+ssh pi true                                                         # works (key)
+ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password pi true   # must say: Permission denied (publickey)
+```
+
+**Undo:** `sudo rm /etc/ssh/sshd_config.d/10-no-password.conf && sudo systemctl reload ssh`.
+
+**Risk:** if you lose the key (new laptop, lost file), you can't log in over the network. Recovery is to take the SD card to another computer and delete that file. Because HDMI is off now, there is no console to fix it from the Pi itself. Keep a copy of the private key, or add a second key to `~/.ssh/authorized_keys` first.
+
+## How to set a NetAlertX password
+
+**State:** the password plugin (`SETPWD`) is loaded but `SETPWD_enable_password` is `False`, so anyone on the LAN can open `http://netalertx.lan`, see every device and change settings. The stored password is already the default, the hash of `123456`, so enabling it without changing it would give no real protection.
+
+**Steps (in the web UI, nothing to run on the Pi):**
+
+1. Open NetAlertX → Settings, and search for "Set Password" (the `SETPWD` section).
+2. Change **Password** to your own. The page stores a hash, not the text.
+3. Turn on **Enable password**, then Save.
+4. Open the site in a private window to check that the login page appears.
+
+**If you lock yourself out:** run on the Pi, as your user: `docker exec -u netalertx netalertx sed -i "s/^SETPWD_enable_password=.*/SETPWD_enable_password=False/" /data/config/app.conf`, then restart the container.
+
+**Note:** NetAlertX's API token (used by scripts) is separate from this password.
