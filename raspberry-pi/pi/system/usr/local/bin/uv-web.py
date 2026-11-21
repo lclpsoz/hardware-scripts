@@ -135,7 +135,7 @@ def build(lines=None, now=None):
     page = f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="refresh" content="60"><title>Pi voltage</title><link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%23ef6c00'/%3E%3Cg%20transform='translate(2.56%202.56)%20scale(1.12)'%20fill='none'%20stroke='white'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M13%202L4%2014h7l-1%208%209-12h-7z'/%3E%3C/g%3E%3C/svg%3E">
-<style>body{{font:15px system-ui;background:#111;color:#ddd;margin:12px;max-width:640px}}
+<style>body{{font:15px system-ui;background:#111;color:#ddd;margin:12px auto;padding:0 12px;max-width:640px}}
 h1{{font-size:18px}}h2{{font-size:15px;margin:18px 0 6px;color:#9ab}}
 .c{{background:#1c1c1c;border-radius:8px;padding:10px;margin:8px 0}}
 .s{{border-left:5px solid {color}}}table{{width:100%;border-collapse:collapse}}
