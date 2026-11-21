@@ -1,0 +1,8 @@
+[Unit]
+Description=Back up the Raspberry Pi to this laptop (skips when a recent backup exists)
+
+[Service]
+Type=oneshot
+ExecStart=@DIR@/run.sh
+Nice=19
+IOSchedulingClass=idle

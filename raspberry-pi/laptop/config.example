@@ -1,0 +1,6 @@
+# Copy to ~/.config/pi-ops/config (chmod 600). Keep it out of git: the topic is the channel's secret.
+NTFY_URL=http://ntfy.lan
+NTFY_TOPIC=change-me-to-a-long-random-string
+# PI_HOST=pi
+# BACKUP_DIR=$HOME/backups/rasp-al-gaib-lite
+# BACKUP_KEEP=14
