@@ -149,3 +149,23 @@ Without patch A, this alone would only bring pages to roughly 4-6 s (a 2× gain 
 - **What the scans see:** the ARP scan found 4 devices at 20:00 (6 counting the internet check and the Pi itself). Pi-hole saw 8 clients in 24 h. Phones with random MACs and sleeping devices often miss single scans, so the list fills in over time.
 - **`psutil sampling failed, using zeros: (pid=205)`** appears every cycle. It only affects NetAlertX's own resource-history chart. Harmless.
 - **SD writes:** the container wrote 559 MiB to the SD card in 36 h, about 370 MiB a day, mostly SQLite WAL churn. The database files are small: 3.9 MB `app.db` plus a 4 MB WAL.
+
+## Device naming pattern (set 2026-11-20)
+
+The Devices list shows Name, Owner and Type but not Group, so the usage goes in the name as a suffix.
+
+| Field | Rule | Example |
+| --- | --- | --- |
+| Name | `Owner Model (Usage)`, Title Case. The usage is a short tag in parentheses, left out when there's nothing to tell apart. Shared devices have no owner. | `Lucas M21s (Money)`, `Lucas Tab A9`, `Samsung TV`, `Smart bulb 1` |
+| Owner | `Lucas`, `Ray` or `Home` | |
+| Type | Phone, Tablet, Laptop, TV, Smart Light, IoT, Gateway (never "Smartphone") | |
+| Group | The same usage word as the suffix: Main, Money, Street, Work, Personal, Guest, Home, IoT, Infra | `Money` |
+| Icon | One per type: mobile, tablet-screen-button, laptop, tv, lightbulb, microchip, globe | |
+| Comments | Model, whether the MAC is real or private (random), reservations, anything unusual | |
+
+Notes:
+
+- **Name source:** every renamed device has its name source set to `USER`, so scans don't overwrite the name.
+- **Private MACs:** a phone that uses a random MAC per network creates a new record whenever the MAC changes. Setting Android's Wi-Fi option "Use device MAC" keeps one record. Older random-MAC duplicates were archived (archived, not deleted; unarchive in the device's page).
+- **The TV** had been named as a phone; it is the device in Pi-hole's `YouTubeAndPrimeOnly` group.
+- **Editing the database directly** needs `docker exec -u netalertx` (the container has no capability to write files owned by another user, even as root).
