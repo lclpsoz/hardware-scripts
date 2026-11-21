@@ -95,9 +95,24 @@ This folder holds:
 | [CHANGES.md](CHANGES.md) | Everything changed on the Pi, with undo |
 | [pi/](pi/) | What runs on the Pi: compose files, Pi-hole changed settings, systemd units, boot config (secrets redacted), plus the proxy, netq and NetAlertX patch that are deployed from here |
 | [scripts/pi-checkup.sh](scripts/pi-checkup.sh) | Read-only health check: `ssh pi 'bash -s' < raspberry-pi/scripts/pi-checkup.sh` |
+| [scripts/backup-pi.sh](scripts/backup-pi.sh) | Back up all important Pi data to the laptop (outside the repo) |
 | [scripts/sync-from-pi.sh](scripts/sync-from-pi.sh) | Refresh `pi/` from the Pi, with redaction and a secret guard |
 | [scripts/uv-flight-recorder.py](scripts/uv-flight-recorder.py), [scripts/uv-step-load-test.sh](scripts/uv-step-load-test.sh) | Undervoltage tools (proposed, not installed) |
 | [data/](data/) | Evidence: undervoltage events and snapshots, a NetAlertX scan cycle (redacted) |
+
+## Backups
+
+`bash raspberry-pi/scripts/backup-pi.sh` saves everything that isn't reproducible from this repo to `~/backups/rasp-al-gaib-lite/<timestamp>/` on the laptop. That folder is outside the repo because it holds private data (Pi-hole history, device list, keys). It takes about a minute, runs at the lowest priority, and verifies the archives and both Pi-hole databases at the end. The first run produced 33 MB.
+
+| File | Restores |
+| --- | --- |
+| `pi-home.tar.gz` | `~/pihole`, `~/netalertx`, `~/proxy`, `~/netq`, the Beszel compose file; Pi-hole databases as consistent snapshots in `etc-pihole/.bk/` |
+| `beszel.tar.gz` | Beszel hub data and keys |
+| `netalertx-volume.tar.gz` | NetAlertX devices and settings (docker volume) |
+| `pihole-teleporter.zip` | Pi-hole settings, lists, local DNS (upload in Settings → Teleporter) |
+| `pi-system.tar.gz` | systemd units, uv scripts, boot config, journald config |
+
+To restore a service: extract its archive into `~`, move the `.bk` snapshots over `gravity.db` and `pihole-FTL.db`, then `docker compose up -d`. For the NetAlertX volume, extract into the docker volume with `docker run --rm -v netalertx_netalertx_data:/data -i python:3.13-alpine tar xzf - -C /data < netalertx-volume.tar.gz`. It does not cover the operating system itself; for that, image the SD card.
 
 ## Keeping this folder in sync with the Pi
 
