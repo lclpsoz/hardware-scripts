@@ -59,6 +59,10 @@ Token in `X-Token` or `?t=`. `/steps?steps=N`, `POST /snooze?min=5` (only length
    Start it now: `pkill -f steps-report; termux-wake-lock; nohup bash ~/steps-loop.sh >/dev/null 2>&1 &`
    Exempt Termux and Termux:Boot from battery optimisation.
 
+## If the phone loop misbehaves
+
+The loop writes what it does to `~/steps-loop.log` on the phone (kept under about 200 KB): each report with the Pi's reply, and for an alarm the volume it set, the phrase and the exit code of the text-to-speech command (124 = it hung and was stopped after 25 s). Every Termux command has a timeout, so one stuck command cannot freeze the loop. Look with `tail -20 ~/steps-loop.log`; run it in the foreground with `bash -x ~/steps-loop.sh` to see every command. The Pi side shows when the phone last reported on `steps.lan` (Phone data).
+
 ## Backup and durability
 
 - The laptop's daily backup ([scripts/backup-pi.sh](scripts/backup-pi.sh), run by the `pi-backup` timer) includes `~/steps`: the code, `config.env` (the secrets, so keep the backup folder private) and all the data. Restore: copy the folder back to `~` on the Pi and run `docker compose up -d`.
