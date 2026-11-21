@@ -10,6 +10,13 @@ The same investigation found three more problems:
 - **The TV makes about a third of all queries,** retrying blocked time servers.
 - **The router nearly tripped Pi-hole's rate limit** for every device that uses it for DNS.
 
+> **Status on 2026-11-20, 21:15:**
+> - You re-assigned the blocklist to `Default`, so all devices are blocked again ([10-ad-blocking.md](10-ad-blocking.md)).
+> - The TV is unplugged for now, which pauses its retry storm until it reconnects.
+> - `database.DBinterval` is now 300.
+> - The web UI moved to port 8080 behind the `.lan` proxy ([07-services.md](07-services.md)).
+> - The rate limit and `dns-forward-max` are unchanged, and section 8 recommends values.
+
 ## 1. The "Maximum number of concurrent DNS queries reached (max: 150)" warning
 
 ### When it happened
@@ -181,3 +188,46 @@ MAC addresses are left out because this repo is public. The vendor comes from ea
 | .4 | (random MAC) | ? | 75 |
 | .2 | Samsung | ? (the runbook listed an IoT device at .2) | 56 |
 | .6 | Samsung | ? | 28 |
+
+## 8. Can the limits go up? (follow-up, 2026-11-20 evening)
+
+Yes. Neither limit is about the Pi's resources: memory and CPU are nowhere near their limits. Both are safety valves set for much bigger or more exposed servers, and both can be raised safely on a home LAN with `listeningMode = LOCAL`, which already refuses queries from outside your subnet.
+
+### Rate limit (per device, default 1000 queries per 60 s)
+
+Busiest minute per device over the last 3 days:
+
+| Device | Busiest minute | When | What it was |
+| --- | --- | --- | --- |
+| 192.168.0.7 (this laptop) | **1,097** | 20 Nov 20:22 | Ad-heavy pages right after blocking came back: 527 of those queries were blocked, and blocked queries count too |
+| 192.168.0.1 (router, all IPv6-DNS devices) | 953 and 721 | 18 Nov 12:25 and 20 Nov 20:17 | Several devices added together |
+| 192.168.0.9 (work laptop) | 818 | 19 Nov 09:24 | Ad-heavy page loads, on top of a work API name it asks for about 180 times a minute |
+
+The 1,097 minute went over the limit. No rate-limit message survived to confirm whether Pi-hole refused queries: the diagnosis list was empty, and the container's text logs were reset when it was recreated (next section). It was close enough either way.
+
+**Recommendation:** raise it to 5000 per 60 s, which keeps protection against a truly broken device:
+
+```bash
+docker exec pihole pihole-FTL --config dns.rateLimit.count 5000
+```
+
+**About the work laptop:** a domain looked up 180 times a minute means a client resolves the name for every request. That is typical of scripts and some runtimes, such as Node.js, that don't cache DNS. Reusing HTTP connections (keep-alive), or an OS-level DNS cache, cuts this to a few lookups an hour. Pi-hole answers them from its cache in about 1 ms anyway, so this is about counting toward the limit, not speed.
+
+### Concurrent forwards (dnsmasq `dns-forward-max`, default 150)
+
+These are queries sent upstream that are still waiting for a reply. Each slot costs a few hundred bytes, so 500 slots is well under 1 MB. Raising it doesn't fix unanswered queries, but it stops a few seconds of upstream trouble from stalling every device.
+
+**Recommendation:** raise it to 512 and keep the real fixes running:
+
+```bash
+docker exec pihole pihole-FTL --config misc.dnsmasq_lines '["dns-forward-max=512"]'
+docker exec pihole grep dns-forward-max /etc/pihole/dnsmasq.conf      # confirm it was written
+```
+
+### Blocking helps the most
+
+A blocked name is answered locally and never uses a slot. With StevenBlack alone, 48% of the forwarded names in the 20 Nov 14:40 burst would have been answered locally, and HaGeZi Pro covers more of that ad-tech ([10-ad-blocking.md](10-ad-blocking.md)). Faster, steadier upstreams help next: Cloudflare took 38 ms for a full lookup here, against Google's 144 ms. An encrypted forwarder may cut the unanswered bursts ([09-encrypted-dns.md](09-encrypted-dns.md)).
+
+### Pi-hole's text logs reset when the container is recreated
+
+`/var/log/pihole` (pihole.log, FTL.log) lives inside the container, not on the `etc-pihole` volume. Recreating the container (for an image update or a compose change) starts the logs empty. The long-term query database is on the volume and is kept. That's acceptable, but if you want the logs kept, mount `./var-log-pihole:/var/log/pihole` in the compose file. It costs about 35 MB a day of SD writes.
