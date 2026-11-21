@@ -283,6 +283,9 @@ def check_flight_recorder():
     try:
         size = os.path.getsize(UV_EVENTS)
     except OSError:
+        if STATE["uv_offset"] is None:           # no file yet: the first event must not be skipped
+            STATE["uv_offset"] = 0
+            dirty()
         return                                   # no events yet
     if STATE["uv_offset"] is None or size < STATE["uv_offset"]:
         STATE["uv_offset"] = 0 if STATE["uv_offset"] is not None else size   # start after history
