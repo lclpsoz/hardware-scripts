@@ -197,6 +197,22 @@
       <div id="msg"></div>
       <p class="hint">Settings apply at once and survive restarts. Changing the buttons' minutes affects the next notification. The Meeting and Nap buttons also appear on every reminder.</p>
     </div>
+
+    <details class="card" style="margin-top:28px">
+      <summary style="cursor:pointer;font-weight:600">Debug tools (for testing)</summary>
+      <p class="hint">Both act on the real service, so reminders and notifications really fire.</p>
+      <div class="row">
+        <label class="f">Add steps<input type="number" id="dbgSteps" min="1" max="20000" value="250"></label>
+        <button id="dbgStepsGo">Add steps now</button>
+      </div>
+      <p class="hint">Sends a fake phone report with the counter raised by this many steps, as if you had walked them just now. 200 or more steps within 5 minutes (counting earlier fake ones too) reset the sitting timer like real walking, and the phone is asked to report fast for a minute. Drawn as a hollow dot; the phone's next real report may look like a restart because its counter is lower.</p>
+      <div class="row" style="margin-top:14px">
+        <label class="f">Sitting time (min)<input type="number" id="dbgSit" min="0" max="600" value="55"></label>
+        <button id="dbgSitGo">Set sitting time</button>
+      </div>
+      <p class="hint">Pretends you have been sitting this long. Reminders fire at the usual levels (for example 55 sends the light one within seconds, 80 starts the constant one).</p>
+      <div id="dbgMsg" class="hint"></div>
+    </details>
   </div>
 </main>
 <script>
@@ -441,6 +457,14 @@ $('save').onclick = async () => {
 };
 $('defaults').onclick = () => { if (defaults) { fillForm(defaults); formDirty = true; msg('Defaults loaded; press Save to apply.'); } };
 $('test').onclick = async () => { try { await api('/api/test', { method: 'POST' }); msg('Test sent. Check the phone.', 'ok'); } catch (e) { msg(e.message, 'err'); } };
+
+async function debugCall(path, body) {
+  const m = $('dbgMsg');
+  try { const j = await api(path, { method: 'POST', body: JSON.stringify(body) }); m.textContent = 'Done' + (j.counter ? ': counter is now ' + j.counter.toLocaleString() : '') + '.'; m.className = 'hint'; refresh(); }
+  catch (e) { m.textContent = e.message; m.className = 'hint'; m.style.color = 'var(--bad)'; }
+}
+$('dbgStepsGo').onclick = () => debugCall('/api/debug/steps', { n: Number($('dbgSteps').value) });
+$('dbgSitGo').onclick = () => debugCall('/api/debug/sitting', { min: Number($('dbgSit').value) });
 
 if (token) start(); else showLogin();
 </script>

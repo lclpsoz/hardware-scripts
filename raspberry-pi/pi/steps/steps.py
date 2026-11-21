@@ -23,6 +23,8 @@ Endpoints (token in header X-Token or ?t=):
   GET  /phone.sh              the Termux loop script (no token)
   POST /api/settings          JSON body with any settings, validated
   POST /api/test              send a test notification
+  POST /api/debug/steps       {"n": N} fake report with the counter raised by N (hollow dot)
+  POST /api/debug/sitting     {"min": M} pretend you have been sitting M minutes
   GET  /health                no token
 """
 import hmac
@@ -313,14 +315,15 @@ def reset(t, why):
     log("timer reset:", why)
 
 
-def add_sample(n):
-    """Record a report. Returns how many seconds the phone should wait before the next one."""
+def add_sample(n, manual=False):
+    """Record a report. Returns how many seconds the phone should wait before the next one.
+    manual=True marks a report made from the debug tools (drawn as a hollow dot)."""
     t = time.time()
     with lock:
         pt, pn = S["last_sample"], S["steps"]
         if pt and pn is not None and 0 < t - pt <= 300 and n >= pn and (n - pn) / (t - pt) * 60 >= SET["walk_spm"]:
             S["walk_until"] = t + WALK_HOLD_S
-        reports.append([int(t), n])
+        reports.append([int(t), n, 1] if manual else [int(t), n])
         append_report(reports[-1])
         while reports and reports[0][0] < t - KEEP_REPORTS_H * 3600:
             reports.popleft()
@@ -546,6 +549,27 @@ class H(BaseHTTPRequestHandler):
                     save_settings()
                 log("settings changed:", ok)
                 return self.reply(200, {"ok": True, "settings": SET})
+            if u.path == "/api/debug/steps" and self.command == "POST":
+                n = int(self.body_json()["n"])
+                if not 1 <= n <= 20000:
+                    return self.reply(400, {"errors": ["n must be between 1 and 20000"]})
+                with lock:
+                    base = S["steps"] if S["steps"] is not None else (reports[-1][1] if reports else 0)
+                add_sample(base + n, manual=True)
+                with lock:
+                    flush_stats()
+                log("debug: added", n, "steps, counter now", base + n)
+                return self.reply(200, {"ok": True, "counter": base + n})
+            if u.path == "/api/debug/sitting" and self.command == "POST":
+                m = float(self.body_json()["min"])
+                if not 0 <= m <= 600:
+                    return self.reply(400, {"errors": ["min must be between 0 and 600"]})
+                with lock:
+                    S["last_move"] = time.time() - m * 60
+                    S["level_sent"], S["last_repeat"] = 0, 0.0
+                    save_state()
+                log("debug: sitting timer set to", m, "min")
+                return self.reply(200, {"ok": True})
             if u.path == "/api/test" and self.command == "POST":
                 notify("Test notification. Try the Meeting and Nap buttons.", 3, "Steps test", "test_tube")
                 return self.reply(200, {"ok": True})

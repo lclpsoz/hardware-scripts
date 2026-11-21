@@ -20,6 +20,7 @@ Shows the sitting timer with the reminder levels, the mode (watching, snoozed, q
 - Stats are kept for a year in `~/steps/data/stats.json` and written at every phone report (and every 15 minutes).
 - **Phone data** (1 h by default, with a 1 h / 3 h / 12 h / 24 h switch; long ranges are thinned to about 900 points): *Steps per minute* shows real steps per minute (one bar per minute for 1 h, wider buckets for longer ranges) against the moving rate (green bars count as moving), and *When the phone reported* plots one dot per report with the step counter value, red bands where reports were missing for 6 min or more, and a table of the last 8 reports. A counter that drops means the phone restarted.
 - Every report (time and counter value) is kept for 24 hours in `~/steps/data/reports.jsonl`: one line per report, written as it arrives, so a crash or restart of the container loses nothing (tested with `kill -9` and a half-written last line). There is no fsync per report (with reports every 10 s that would wear the SD card), so a power cut can lose the last few seconds. Stats are written at most once a minute. A third value `1` marks a point added by hand; it is drawn as a hollow dot and never counts as the phone reporting. The sitting timer is kept in `state.json` (with a `saved_at` time) and restored on start however old it is; it is dropped only if the service itself was down longer than the phone-silent limit (for example the Pi was off for hours).
+- **Debug tools** (collapsed, at the bottom): *Add steps* sends a fake phone report with the counter raised by N (drawn as a hollow dot, so walking detection and the timer reset run for real), and *Set sitting time* pretends you have been sitting M minutes so the reminder levels fire without waiting. Both act on the live service.
 - The card on [home.lan](http://home.lan) shows whether it answers.
 
 ## Files
@@ -35,7 +36,7 @@ Shows the sitting timer with the reminder levels, the mode (watching, snoozed, q
 
 ## Endpoints
 
-Token in `X-Token` or `?t=`. `/steps?steps=N`, `/snooze?min=60&kind=meeting|nap`, `/resume`, `/status`, `/api/state`, `POST /api/settings`, `POST /api/test`; `/`, `/health` and `/phone.sh` need no token.
+Token in `X-Token` or `?t=`. `/steps?steps=N`, `/snooze?min=60&kind=meeting|nap`, `/resume`, `/status`, `/api/state`, `POST /api/settings`, `POST /api/test`, `POST /api/debug/steps` and `POST /api/debug/sitting` (JSON `{"n": N}` and `{"min": M}`); `/`, `/health` and `/phone.sh` need no token.
 
 ## Phone setup
 
