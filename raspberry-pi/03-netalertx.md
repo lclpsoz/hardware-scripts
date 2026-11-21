@@ -159,7 +159,7 @@ The Devices list shows Name, Owner and Type but not Group, so the usage goes in 
 | Name | `Owner Model (Usage)`, Title Case. The usage is a short tag in parentheses, left out when there's nothing to tell apart. Shared devices have no owner. | `Lucas M21s (Money)`, `Lucas Tab A9`, `Samsung TV`, `Smart bulb 1` |
 | Owner | `Lucas`, `Ray` or `Home` | |
 | Type | Phone, Tablet, Laptop, TV, Smart Light, IoT, Gateway (never "Smartphone") | |
-| Group | The same usage word as the suffix: Main, Money, Street, Work, Personal, Guest, Home, IoT, Infra | `Money` |
+| Group | The same usage word as the suffix: Main, Money, Street, Work, Personal, Home, IoT, Infra. Left empty when there is no usage to tell apart (Ray's devices) | `Money` |
 | Icon | One per type: mobile, tablet-screen-button, laptop, tv, lightbulb, microchip, globe | |
 | Comments | Model, whether the MAC is real or private (random), reservations, anything unusual | |
 
