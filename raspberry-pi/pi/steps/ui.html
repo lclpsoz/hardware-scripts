@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Steps reminders</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23c2185b'/%3E%3Cpath d='M11 22l4-12 3 8 3-5' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f6f6f4; --card: #ffffff; --text: #1d1d1b; --muted: #6b6b66;
+    --line: #e2e2dc; --accent: #c2185b; --ok: #2e7d32; --bad: #c62828; --warn: #ef6c00; --wait: #9e9e99;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151514; --card: #1f1f1d; --text: #ecece8; --muted: #a3a39c;
+            --line: #33332f; --accent: #f06292; --ok: #66bb6a; --bad: #ef5350; --warn: #ffa726; --wait: #77776f; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 28px 16px 40px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 28px 0 8px; color: var(--muted); font-weight: 600; }
+  .sub { color: var(--muted); margin: 0 0 18px; font-size: 14px; }
+  .sub a { color: var(--accent); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+  .tile .label { color: var(--muted); font-size: 13px; }
+  .tile .value { font-size: 24px; font-weight: 600; }
+  .tile .note { color: var(--muted); font-size: 13px; }
+  .hero { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: baseline; }
+  .big { font-size: 44px; font-weight: 700; line-height: 1.1; }
+  .pill { display: inline-block; font-size: 13px; padding: 2px 10px; border-radius: 999px;
+          border: 1px solid var(--line); color: var(--muted); }
+  .pill.watching { color: var(--ok); border-color: var(--ok); }
+  .pill.snoozed, .pill.quiet { color: var(--accent); border-color: var(--accent); }
+  .pill.no-data, .pill.off { color: var(--warn); border-color: var(--warn); }
+  .bar { position: relative; height: 12px; background: var(--line); border-radius: 6px; margin: 18px 0 30px; }
+  .fill { position: absolute; inset: 0 auto 0 0; border-radius: 6px; background: var(--ok); transition: width .5s; }
+  .mark { position: absolute; top: -4px; width: 2px; height: 20px; background: var(--muted); }
+  .mark span { position: absolute; top: 22px; left: 50%; transform: translateX(-50%); font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px; }
+  button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line);
+           background: var(--card); color: var(--text); cursor: pointer; }
+  button:hover, button:focus-visible { border-color: var(--accent); outline: none; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  input[type=number], input[type=time], input[type=password], input[type=text] {
+    font: inherit; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); width: 6.5em; }
+  input[type=password] { width: 16em; }
+  label.f { display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: var(--muted); }
+  .form { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px 14px; }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--text); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; font-size: 13px; }
+  td, th { padding: 6px 4px; border-top: 1px solid var(--line); }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  .mini { height: 8px; background: var(--accent); border-radius: 4px; min-width: 1px; }
+  #msg { min-height: 1.4em; font-size: 14px; margin-top: 8px; }
+  #msg.err { color: var(--bad); } #msg.ok { color: var(--ok); }
+  .hint { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  svg text { fill: var(--muted); font-size: 10px; }
+  svg .b { fill: var(--accent); }
+  .hidden { display: none; }
+  @media (max-width: 480px) { .big { font-size: 36px; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Steps reminders</h1>
+  <p class="sub">Nudges you to walk when the phone step counter stays flat · <a href="http://home.lan/">all services</a></p>
+
+  <div id="login" class="card hidden">
+    <b>Token needed</b>
+    <p class="hint">Paste the <code>STEPS_TOKEN</code> from <code>~/steps/config.env</code> on the Pi. It is kept in this browser only.</p>
+    <div class="row"><input type="password" id="tok" autocomplete="off" placeholder="token"><button class="primary" id="tokOk">Save</button></div>
+  </div>
+
+  <div id="app" class="hidden">
+    <div class="card">
+      <div class="hero">
+        <div><div class="big"><span id="sit">0</span> min</div><div class="hint">sitting (no 200 steps in 5 min)</div></div>
+        <span id="mode" class="pill">…</span>
+        <span id="next" class="hint"></span>
+      </div>
+      <div class="bar" id="bar"><div class="fill" id="fill"></div></div>
+      <div class="row" id="snz"></div>
+      <div id="snzNote" class="hint"></div>
+    </div>
+
+    <h2>Today</h2>
+    <div class="grid">
+      <div class="card tile"><div class="label">Steps</div><div class="value" id="tSteps">0</div><div class="note">counted since the service saw the phone</div></div>
+      <div class="card tile"><div class="label">Reminders</div><div class="value" id="tRem">0</div><div class="note" id="tRemN"></div></div>
+      <div class="card tile"><div class="label">Longest sitting</div><div class="value" id="tLong">0 min</div></div>
+      <div class="card tile"><div class="label">Times you got up</div><div class="value" id="tMoves">0</div><div class="note" id="tSnz"></div></div>
+      <div class="card tile"><div class="label">Phone last report</div><div class="value" id="tAge">–</div><div class="note" id="tCount"></div></div>
+    </div>
+
+    <h2>Steps per hour today</h2>
+    <div class="card"><svg id="hours" viewBox="0 0 480 110" width="100%" role="img" aria-label="Steps per hour today"></svg></div>
+
+    <h2>Last 14 days</h2>
+    <div class="card"><table>
+      <thead><tr><th>Day</th><th class="n">Steps</th><th style="width:30%"></th><th class="n">Reminders</th><th class="n">Longest</th><th class="n">Snoozes</th></tr></thead>
+      <tbody id="hist"></tbody>
+    </table></div>
+
+    <h2>Settings</h2>
+    <div class="card">
+      <label class="check"><input type="checkbox" id="s_enabled"> Reminders on</label>
+      <p class="hint" style="margin-top:12px">Minutes of sitting before each reminder:</p>
+      <div class="row" style="gap:14px">
+        <label class="f">Light<input type="number" id="l0" min="1" step="1"></label>
+        <label class="f">Mid<input type="number" id="l1" min="1" step="1"></label>
+        <label class="f">High<input type="number" id="l2" min="1" step="1"></label>
+        <label class="f">Constant<input type="number" id="l3" min="1" step="1"></label>
+      </div>
+      <div class="form" style="margin-top:14px">
+        <label class="f">Repeat when constant (s)<input type="number" id="s_repeat_s" min="5" max="600"></label>
+        <label class="f">Steps that count as moving<input type="number" id="s_move_steps" min="10" max="5000"></label>
+        <label class="f">…within (minutes)<input type="number" id="s_move_window_min" min="1" max="60"></label>
+        <label class="f">Phone silent after (min)<input type="number" id="s_stale_min" min="5" max="240"></label>
+        <label class="f">Meeting snooze (min)<input type="number" id="s_meeting_min" min="1" max="600"></label>
+        <label class="f">Nap snooze (min)<input type="number" id="s_nap_min" min="1" max="600"></label>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <label class="check"><input type="checkbox" id="s_quiet_enabled"> Quiet hours</label>
+        <input type="text" id="s_quiet_start" maxlength="5" placeholder="22:00" inputmode="numeric" style="width:5em"> to
+        <input type="text" id="s_quiet_end" maxlength="5" placeholder="07:00" inputmode="numeric" style="width:5em">
+        <span class="hint">24-hour, Pi time (UTC-3)</span>
+      </div>
+      <div class="row" style="margin-top:16px">
+        <button class="primary" id="save">Save</button>
+        <button id="defaults">Load defaults</button>
+        <button id="test">Send test notification</button>
+        <button id="tokClear">Forget token</button>
+      </div>
+      <div id="msg"></div>
+      <p class="hint">Settings apply at once and survive restarts. Changing the buttons' minutes affects the next notification. The Meeting and Nap buttons also appear on every reminder.</p>
+    </div>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let token = ''; try { token = localStorage.getItem('stepsToken') || ''; } catch (e) {}
+let settings = null, defaults = null, formDirty = false, timer = null;
+
+function msg(t, cls) { const m = $('msg'); m.textContent = t; m.className = cls || ''; }
+async function api(path, opts = {}) {
+  const r = await fetch(path, { cache: 'no-store', ...opts, headers: { 'X-Token': token, 'Content-Type': 'application/json' } });
+  if (r.status === 403) { showLogin(); throw new Error('token'); }
+  const j = await r.json();
+  if (!r.ok) throw new Error((j.errors || [j.error || r.status]).join('; '));
+  return j;
+}
+function showLogin() {
+  $('login').classList.remove('hidden'); $('app').classList.add('hidden');
+  clearInterval(timer); timer = null;
+}
+function fmtAge(s) { return s == null ? '–' : s < 90 ? s + ' s ago' : Math.round(s / 60) + ' min ago'; }
+const MODES = { watching: 'watching', snoozed: 'snoozed', quiet: 'quiet hours', 'no-data': 'no phone data', off: 'reminders off' };
+
+function fillForm(s) {
+  $('s_enabled').checked = s.enabled;
+  s.levels_min.forEach((v, i) => $('l' + i).value = v);
+  $('s_repeat_s').value = s.repeat_s; $('s_move_steps').value = s.move_steps;
+  $('s_move_window_min').value = Math.round(s.move_window_s / 60); $('s_stale_min').value = s.stale_min;
+  $('s_meeting_min').value = s.meeting_min; $('s_nap_min').value = s.nap_min;
+  $('s_quiet_enabled').checked = s.quiet_enabled; $('s_quiet_start').value = s.quiet_start; $('s_quiet_end').value = s.quiet_end;
+}
+function readForm() {
+  return {
+    enabled: $('s_enabled').checked,
+    levels_min: [0, 1, 2, 3].map(i => Number($('l' + i).value)),
+    repeat_s: Number($('s_repeat_s').value), move_steps: Number($('s_move_steps').value),
+    move_window_s: Number($('s_move_window_min').value) * 60, stale_min: Number($('s_stale_min').value),
+    meeting_min: Number($('s_meeting_min').value), nap_min: Number($('s_nap_min').value),
+    quiet_enabled: $('s_quiet_enabled').checked, quiet_start: $('s_quiet_start').value, quiet_end: $('s_quiet_end').value
+  };
+}
+
+function render(d) {
+  const st = d.status, s = d.settings, t = d.today;
+  settings = s; defaults = d.defaults;
+  if (!formDirty) fillForm(s);
+  $('sit').textContent = Math.floor(st.sitting_min);
+  const m = $('mode'); m.textContent = MODES[st.mode] || st.mode; m.className = 'pill ' + st.mode;
+  const lv = s.levels_min, max = lv[3] * 1.15;
+  $('bar').querySelectorAll('.mark').forEach(e => e.remove());
+  lv.forEach((v, i) => {
+    const e = document.createElement('div'); e.className = 'mark'; e.style.left = (v / max * 100) + '%';
+    const sp = document.createElement('span'); sp.textContent = v + ' · ' + ['light', 'mid', 'high', 'constant'][i];
+    e.appendChild(sp); $('bar').appendChild(e);
+  });
+  const pct = Math.min(100, st.sitting_min / max * 100);
+  $('fill').style.width = pct + '%';
+  $('fill').style.background = st.level >= 3 ? 'var(--bad)' : st.level >= 1 ? 'var(--warn)' : 'var(--ok)';
+  const next = lv.find(v => v > st.sitting_min);
+  $('next').textContent = st.mode !== 'watching' ? '' : next ? 'next reminder in ' + Math.ceil(next - st.sitting_min) + ' min' : 'constant reminders until you walk';
+
+  const snz = $('snz'); snz.textContent = '';
+  const add = (label, fn, cls) => { const b = document.createElement('button'); b.textContent = label; if (cls) b.className = cls; b.onclick = fn; snz.appendChild(b); };
+  add('Meeting ' + s.meeting_min + ' min', () => snooze(s.meeting_min, 'meeting'));
+  add('Nap ' + s.nap_min + ' min', () => snooze(s.nap_min, 'nap'));
+  add('Pause 2 h', () => snooze(120, 'meeting'));
+  if (st.mode === 'snoozed') add('Resume now', async () => { await api('/resume'); refresh(); }, 'primary');
+  $('snzNote').textContent = st.mode === 'snoozed' ? 'Paused (' + st.snooze_kind + '), ' + Math.ceil(st.snooze_left_min) + ' min left. The timer restarts when it ends.' : '';
+
+  $('tSteps').textContent = t.steps.toLocaleString();
+  const r = t.reminders; $('tRem').textContent = r[0] + r[1] + r[2] + r[3];
+  $('tRemN').textContent = r[0] + ' light · ' + r[1] + ' mid · ' + r[2] + ' high · ' + r[3] + ' constant';
+  $('tLong').textContent = Math.round(t.longest_min) + ' min';
+  $('tMoves').textContent = t.moves; $('tSnz').textContent = t.snoozes.meeting + ' meeting · ' + t.snoozes.nap + ' nap snoozes';
+  $('tAge').textContent = fmtAge(st.last_sample_age_s); $('tCount').textContent = st.steps == null ? '' : 'counter ' + st.steps.toLocaleString();
+
+  const svg = $('hours'); svg.textContent = '';
+  const mx = Math.max(50, ...t.hourly), ns = 'http://www.w3.org/2000/svg';
+  t.hourly.forEach((v, h) => {
+    const bh = v / mx * 80, x = 8 + h * 19.3;
+    const rc = document.createElementNS(ns, 'rect'); rc.setAttribute('class', 'b'); rc.setAttribute('x', x); rc.setAttribute('width', 14);
+    rc.setAttribute('y', 88 - bh); rc.setAttribute('height', Math.max(bh, v ? 1 : 0)); rc.setAttribute('rx', 2);
+    const ti = document.createElementNS(ns, 'title'); ti.textContent = String(h).padStart(2, '0') + ':00 · ' + v + ' steps'; rc.appendChild(ti); svg.appendChild(rc);
+    if (h % 3 === 0) { const tx = document.createElementNS(ns, 'text'); tx.setAttribute('x', x); tx.setAttribute('y', 104); tx.textContent = String(h).padStart(2, '0'); svg.appendChild(tx); }
+  });
+
+  const body = $('hist'); body.textContent = '';
+  const hmax = Math.max(1, ...d.history.map(x => x.steps));
+  d.history.slice().reverse().forEach(x => {
+    const tr = document.createElement('tr'), c = (txt, cls) => { const td = document.createElement('td'); if (cls) td.className = cls; td.textContent = txt; tr.appendChild(td); return td; };
+    c(x.date.slice(5)); c(x.steps.toLocaleString(), 'n');
+    const bt = c(''); const bar = document.createElement('div'); bar.className = 'mini'; bar.style.width = (x.steps / hmax * 100) + '%'; bt.appendChild(bar);
+    c(x.reminders.reduce((a, b) => a + b, 0), 'n'); c(Math.round(x.longest_min) + ' min', 'n'); c(x.snoozes.meeting + x.snoozes.nap, 'n');
+    body.appendChild(tr);
+  });
+}
+
+async function snooze(min, kind) {
+  try { await api('/snooze?min=' + min + '&kind=' + kind, { method: 'POST' }); refresh(); } catch (e) { msg(e.message, 'err'); }
+}
+async function refresh() {
+  try { render(await api('/api/state')); } catch (e) { if (e.message !== 'token') msg('Cannot reach the service: ' + e.message, 'err'); }
+}
+function start() {
+  $('login').classList.add('hidden'); $('app').classList.remove('hidden');
+  refresh(); clearInterval(timer); timer = setInterval(refresh, 10000);
+}
+
+$('tokOk').onclick = () => { token = $('tok').value.trim(); try { localStorage.setItem('stepsToken', token); } catch (e) {} start(); };
+$('tokClear').onclick = () => { try { localStorage.removeItem('stepsToken'); } catch (e) {} token = ''; showLogin(); };
+document.querySelectorAll('#app input').forEach(i => { if (i.closest('.card') && i.id.match(/^(s_|l\d)/)) i.addEventListener('input', () => formDirty = true); });
+$('save').onclick = async () => {
+  try { await api('/api/settings', { method: 'POST', body: JSON.stringify(readForm()) }); formDirty = false; msg('Saved.', 'ok'); refresh(); }
+  catch (e) { msg(e.message, 'err'); }
+};
+$('defaults').onclick = () => { if (defaults) { fillForm(defaults); formDirty = true; msg('Defaults loaded; press Save to apply.'); } };
+$('test').onclick = async () => { try { await api('/api/test', { method: 'POST' }); msg('Test sent. Check the phone.', 'ok'); } catch (e) { msg(e.message, 'err'); } };
+
+if (token) start(); else showLogin();
+</script>
+</body>
+</html>

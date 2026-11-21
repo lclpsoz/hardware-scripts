@@ -13,6 +13,7 @@ services:
       NTFY_URL: http://127.0.0.1:2586
     volumes:
       - ./steps.py:/app/steps.py:ro
+      - ./ui.html:/app/ui.html:ro
       - ./data:/data
     read_only: true
     tmpfs:
