@@ -1,0 +1,31 @@
+--- a/front/php/templates/language/lang.php (v26.10.28)	2026-11-20 20:04:18.462271545 -0300
++++ b/front/php/templates/language/lang.php (cached)	2026-11-20 20:04:18.458141329 -0300
+@@ -74,14 +74,20 @@
+ {
+     global $pia_lang_selected, $strings;
+ 
+-    // Get the data from JSON files
+-    $languageData = getLanguageDataFromJson();
+-
+-    // Get the data from SQL query
+-    $sqlLanguageData = $strings;
+-
+-    // Merge JSON data with SQL data
+-    $mergedLanguageData = mergeLanguageData($languageData, $sqlLanguageData);
++    // Build the merged strings once per request instead of on every call.
++    // Only the selected language and the en_us fallback are ever read below,
++    // so only those two files are decoded (not all 24).
++    static $mergedLanguageData = null;
++    if ($mergedLanguageData === null) {
++        $needed = [];
++        foreach (array_unique([$pia_lang_selected, 'en_us']) as $code) {
++            $path = dirname(__FILE__) . '/' . $code . '.json';
++            if (file_exists($path)) {
++                $needed[$code] = json_decode(file_get_contents($path), true) ?: [];
++            }
++        }
++        $mergedLanguageData = mergeLanguageData($needed, $strings);
++    }
+ 
+     // Check if the key exists in the selected language
+     if (isset($mergedLanguageData[$pia_lang_selected][$key]) && $mergedLanguageData[$pia_lang_selected][$key] != '') {
