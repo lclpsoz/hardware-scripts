@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """uv-web: tiny read-only page with the Raspberry Pi undervoltage history.
 
-Reads the kernel log through journalctl on demand (cached for 20 s), so it
+Reads the kernel log of ALL boots (the journal is persistent; plain -k would
+show only the current boot) through journalctl on demand (cached for 20 s), so it
 uses no CPU while nobody has the page open. Standard library only.
 """
 import html
@@ -23,7 +24,7 @@ _cache = {"t": 0.0, "page": b"", "json": b""}
 
 def get_lines():
     out = subprocess.run(
-        ["journalctl", "-k", "--since", f"{DAYS} days ago", "-o", "short-iso", "--no-pager"],
+        ["journalctl", "-k", "-b", "all", "--since", f"{DAYS} days ago", "-o", "short-iso", "--no-pager"],
         capture_output=True, text=True, timeout=30,
     )
     return out.stdout.splitlines()
