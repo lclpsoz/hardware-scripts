@@ -200,11 +200,11 @@
       <label class="check" style="margin:8px 0"><input type="checkbox" id="s_phone_alarm"> Phone alarm at level 4 (the phone loop speaks the phrase below on the alarm volume)</label>
       <div class="orow">
         <label class="f">Alarm type<select id="s_alarm_mode"><option value="timer">Clock timer (rings like a timer)</option><option value="speech">Spoken phrase (text-to-speech)</option></select></label>
-        <label class="f">Timer label / phrase<input type="text" id="s_alarm_text" maxlength="60" style="width:15em"></label>
+        <label class="f">Timer label / phrase<input type="text" id="s_alarm_text" maxlength="60" style="width:22em;max-width:100%"></label>
         <label class="f">Alarm volume (% of max)<input type="number" id="s_alarm_volume" min="10" max="100"></label>
         <label class="f">At most once every (s)<input type="number" id="s_alarm_repeat_s" min="10" max="3600"></label>
       </div>
-      <p class="hint">The timer type asks the phone's Clock app for a 1-second timer, which then rings on the alarm volume until dismissed, so it is sent at most once per interval above. It needs "Display over other apps" for Termux in Android settings.</p>
+      <p class="hint">The timer type asks the phone's Clock app for a 1-second timer, which then rings on the alarm volume until dismissed, so it is sent at most once per interval above. It needs "Display over other apps" for Termux in Android settings. The label can have emojis and <code>{min}</code> (minutes sitting) and <code>{time}</code> (clock time); speech drops the emojis.</p>
       <div id="notifs"></div>
       <div class="row" style="margin-top:16px">
         <button class="primary" id="save">Save</button>

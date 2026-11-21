@@ -91,7 +91,7 @@ DEFAULTS = {
     "snooze_opts": [[30, 90], [5, 110], [1, 0]],
     "phone_alarm": True,                # at the last level the phone loop plays a loud alarm
     "alarm_mode": "timer",              # "timer": a 1-second Clock-app timer labelled with the phrase; "speech": text-to-speech
-    "alarm_text": "Time to walk",        # the timer's label, or what the phone says
+    "alarm_text": "\U0001F6B6 Time to walk! Sitting {min} min",   # timer label / spoken phrase; {min}, {time}
     "alarm_repeat_s": 60,               # at most one phone alarm per this many seconds
     "alarm_volume": 50,                 # alarm volume, percent of the phone's maximum
     "notif": NOTIF_DEFAULTS,
@@ -272,10 +272,11 @@ def validate(d):
             err.append("alarm_mode must be timer or speech")
     if "alarm_text" in d:
         txt = str(d["alarm_text"]).strip()
-        if re.fullmatch(r"[\w .,!?'-]{1,60}", txt):
+        # emojis allowed; no quotes, backslashes or control characters (the phone script passes it on)
+        if 1 <= len(txt) <= 60 and not re.search(r'["\\`]|[\x00-\x1f]', txt):
             out["alarm_text"] = txt
         else:
-            err.append("alarm_text must be 1-60 letters, digits, spaces or . , ! ? ' -")
+            err.append('alarm_text must be 1-60 characters without quotes, backslashes or line breaks')
     num("report_idle_s", 5, 600)
     num("report_walk_s", 2, 120)
     num("walk_spm", 5, 200)
@@ -394,6 +395,18 @@ def send(typ, **ctx):
     except (ValueError, IndexError, AttributeError):
         msg, title = n["msg"], n["title"]
     notify(msg, n["prio"], title, TAGS.get(typ, "walking"), mins if typ.startswith("level") else None)
+
+
+def alarm_label():
+    """The timer label / spoken phrase with {min} and {time} filled in. Emojis are dropped for speech."""
+    ctx = _Fmt(min=int(sitting_min()), time=time.strftime("%H:%M"))
+    try:
+        txt = SET["alarm_text"].format_map(ctx)
+    except (ValueError, IndexError, AttributeError):
+        txt = SET["alarm_text"]
+    if SET["alarm_mode"] == "speech":
+        txt = re.sub(r"[^\w .,!?'\-:]", "", txt).strip() or "Time to walk"
+    return txt
 
 
 def alarm_active(t):
@@ -634,7 +647,7 @@ class H(BaseHTTPRequestHandler):
                     nxt = min(nxt, next_report_s(now))            # fast reports as the last level nears
                 out = {"ok": True, "next_s": nxt, "alarm": int(due)}
                 if due:
-                    out.update(mode=SET["alarm_mode"], say=SET["alarm_text"], vol=SET["alarm_volume"])
+                    out.update(mode=SET["alarm_mode"], say=alarm_label(), vol=SET["alarm_volume"])
                 return self.reply(200, out)
             if u.path == "/snooze":
                 m = int((q.get("min") or [0])[0])
