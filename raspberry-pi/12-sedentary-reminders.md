@@ -7,7 +7,7 @@ A small container, `steps`, nags you through ntfy when your phone's step counter
 - The phone sends its cumulative step counter to `http://192.168.0.250:8097/steps` from a loop in Termux ([pi/steps/steps-loop.sh](pi/steps/steps-loop.sh)). **The Pi answers each report with `next_s`, how long to wait**: 60 s normally and 10 s while you walk (20 steps per minute or more, kept for 60 s after the last walking). Both intervals and the walking threshold are settings on the web page; the loop never needs editing.
 - "Moved" means at least 200 steps within 5 minutes. That resets the sitting timer.
 - Escalation by minutes sitting: **50** light (ntfy priority 3), **60** mid (4), **70** high (5), **80+** constant (priority 5 every 20 s) until you walk.
-- Every reminder has two buttons: **Meeting 60m** and **Nap 30m**. Both pause reminders; the timer restarts when the pause ends.
+- Every reminder has two buttons: **Meeting 60m** and **Nap 30m**. Both PAUSE the sitting timer: it is frozen during the snooze and carries on from the same value afterwards (it is not reset). Real walking during a snooze still resets it.
 - No reminders from 22:00 to 07:00 (America/Sao_Paulo), and none while the phone has been silent for 30 min (you get one low-priority notice).
 
 All numbers are settings. They start from the optional values in `~/steps/config.env` (`LEVELS_MIN`, `REPEAT_S`, `MOVE_STEPS`, `QUIET_HOURS`, `MEETING_MIN`, `NAP_MIN`) and are changed in the web page below, which wins once saved.

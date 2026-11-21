@@ -266,7 +266,7 @@ function render(d) {
   add('Nap ' + s.nap_min + ' min', () => snooze(s.nap_min, 'nap'));
   add('Pause 2 h', () => snooze(120, 'meeting'));
   if (st.mode === 'snoozed') add('Resume now', async () => { await api('/resume'); refresh(); }, 'primary');
-  $('snzNote').textContent = st.mode === 'snoozed' ? 'Paused (' + st.snooze_kind + '), ' + Math.ceil(st.snooze_left_min) + ' min left. The timer restarts when it ends.' : '';
+  $('snzNote').textContent = st.mode === 'snoozed' ? 'Paused (' + st.snooze_kind + '), ' + Math.ceil(st.snooze_left_min) + ' min left. The sitting timer is paused and carries on afterwards.' : '';
 
   $('tSteps').textContent = t.steps.toLocaleString();
   const r = t.reminders; $('tRem').textContent = r[0] + r[1] + r[2] + r[3];

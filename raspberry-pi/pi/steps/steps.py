@@ -5,7 +5,7 @@ The phone posts its cumulative step counter to /steps. If fewer than move_steps
 steps happen within move_window_s seconds, the "sitting" timer keeps running.
 Escalation (minutes sitting): level 1 light (ntfy prio 3), 2 mid (4), 3 high (5),
 4 constant (prio 5 every repeat_s seconds) until you walk.
-Snooze (meeting / nap) pauses everything; the timer restarts when it ends.
+Snooze (meeting / nap) PAUSES the sitting timer; it carries on from where it was when the snooze ends.
 
 Settings (editable in the web page, saved to /data/settings.json) start from the
 environment variables below. Daily stats are kept in /data/stats.json (30 days),
@@ -76,7 +76,7 @@ WALK_HOLD_S = 60      # keep reporting fast this long after the last walking see
 SET = dict(DEFAULTS)
 
 lock = threading.Lock()
-S = {"last_move": time.time(), "snooze_until": 0.0, "snooze_kind": "", "last_sample": 0.0, "walk_until": 0.0, "stats_flush": 0.0,
+S = {"last_move": time.time(), "snooze_start": 0.0, "snooze_until": 0.0, "snooze_kind": "", "last_sample": 0.0, "walk_until": 0.0, "stats_flush": 0.0,
      "stale_told": False, "level_sent": 0, "last_repeat": 0.0, "steps": None, "started": time.time()}
 samples = deque()
 stats = {}            # "YYYY-MM-DD" -> day record
@@ -114,6 +114,7 @@ def read_json(name):
 def save_state():
     """Snooze and the time of the last movement, so a restart does not reset the sitting timer."""
     write_json("state.json", {"snooze_until": S["snooze_until"], "snooze_kind": S["snooze_kind"],
+                              "snooze_start": S["snooze_start"],
                               "last_move": S["last_move"], "saved_at": time.time()})
 
 
@@ -163,6 +164,7 @@ def load():
     d = read_json("state.json") or {}
     S["snooze_until"] = float(d.get("snooze_until", 0))
     S["snooze_kind"] = d.get("snooze_kind", "")
+    S["snooze_start"] = float(d.get("snooze_start", 0))
     saved = read_json("settings.json") or {}
     ok, _ = validate(saved)
     SET.update(ok)
@@ -356,17 +358,24 @@ def next_report_s(t):
     return SET["report_walk_s"] if t < S["walk_until"] else SET["report_idle_s"]
 
 
+def end_snooze(t):
+    """A snooze PAUSES the sitting timer: the time spent snoozed is added back, so the timer carries
+    on from where it was. (If you really walked during the snooze, the timer was already reset.)"""
+    if S["snooze_start"] and S["last_move"] < S["snooze_start"]:
+        S["last_move"] += max(0.0, t - S["snooze_start"])
+    S["snooze_until"], S["snooze_kind"], S["snooze_start"] = 0.0, "", 0.0
+    save_state()
+
+
 def tick():
     t = time.time()
     with lock:
         if S["snooze_until"]:
             if t < S["snooze_until"]:
-                S["last_move"] = t
-                return
-            S["snooze_until"], S["snooze_kind"] = 0.0, ""
-            save_state()
-            reset(t, "snooze ended")
-            notify("Snooze over, the timer starts now.", 2, "Snooze ended", "alarm_clock", actions=False)
+                return                       # paused: the timer neither runs nor resets
+            end_snooze(S["snooze_until"])
+            log("snooze ended, timer continues at", round((t - S["last_move"]) / 60, 1), "min")
+            notify("Snooze over, the sitting timer continues.", 2, "Snooze ended", "alarm_clock", actions=False)
             return
         if not SET["enabled"] or in_quiet(t):
             S["last_move"] = t
@@ -432,7 +441,8 @@ def state(t):
     mode = ("off" if not SET["enabled"] else "snoozed" if snoozed else "quiet" if quiet
             else "no-data" if stale or not S["last_sample"] else "watching")
     return {
-        "mode": mode, "sitting_min": round((t - S["last_move"]) / 60, 1), "level": S["level_sent"],
+        "mode": mode,
+        "sitting_min": round(((S["snooze_start"] if snoozed and S["snooze_start"] else t) - S["last_move"]) / 60, 1), "level": S["level_sent"],
         "steps": S["steps"], "last_sample_age_s": round(t - S["last_sample"]) if S["last_sample"] else None,
         "snooze_left_min": round(max(0, S["snooze_until"] - t) / 60, 1), "snooze_kind": S["snooze_kind"],
         "quiet_now": quiet, "uptime_min": round((t - S["started"]) / 60),
@@ -497,7 +507,10 @@ class H(BaseHTTPRequestHandler):
                 m = max(1, min(600, int((q.get("min") or [SET["meeting_min"]])[0])))
                 kind = (q.get("kind") or ["meeting"])[0][:10]
                 with lock:
-                    S["snooze_until"], S["snooze_kind"] = time.time() + m * 60, kind
+                    now = time.time()
+                    if not (S["snooze_until"] and now < S["snooze_until"]):
+                        S["snooze_start"] = now          # a new snooze pauses the timer; extending one keeps its start
+                    S["snooze_until"], S["snooze_kind"] = now + m * 60, kind
                     save_state()
                     if kind in ("meeting", "nap"):
                         bump(lambda d: d["snoozes"].__setitem__(kind, d["snoozes"].get(kind, 0) + 1))
@@ -505,9 +518,8 @@ class H(BaseHTTPRequestHandler):
                 return self.reply(200, {"snoozed_min": m, "kind": kind})
             if u.path == "/resume":
                 with lock:
-                    S["snooze_until"], S["snooze_kind"] = 0.0, ""
-                    save_state()
-                    reset(time.time(), "snooze cancelled")
+                    if S["snooze_until"]:
+                        end_snooze(time.time())          # the timer carries on, it is not reset
                 return self.reply(200, {"ok": True})
             if u.path == "/status":
                 with lock:
