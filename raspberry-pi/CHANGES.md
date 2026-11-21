@@ -4,6 +4,7 @@ Newest first. Earlier entries come from the Claude Docs written during previous 
 
 | Date | Change | Where | Why | Undo |
 | --- | --- | --- | --- | --- |
+| 2026-11-20 21:39 | Allow `pool.ntp.org` for the TV group `YouTubeAndPrimeOnly` only (exact allow, group 3) | Pi-hole gravity.db, domain list id 12 | Stops the TV retrying its clock lookup (38k queries in 14 days); the `.*` deny stays for everything else | `docker exec pihole pihole-FTL sqlite3 /etc/pihole/gravity.db "delete from domainlist where id=12"` then `docker exec pihole pihole reloadlists` |
 | 2026-11-20 ~23:50 | HDMI port turned off: `video=HDMI-A-1:d` added to `cmdline.txt` and the port set to `off` now; reads `disconnected` | `/boot/firmware/cmdline.txt` (backup `cmdline.txt.bak-hdmi`), done by you with sudo | Stops the phantom-connected polling and 8,400 log lines a day | `sudo cp /boot/firmware/cmdline.txt.bak-hdmi /boot/firmware/cmdline.txt`, then reboot |
 | 2026-11-20 21:06 | netq internet-quality logger at `net.lan` | `~/netq` (container `netq`) | Evidence for ISP and DNS problems; speed tests | `cd ~/netq && docker compose down` |
 | 2026-11-20 20:57 | Local DNS names: `home`, `pi`, `pihole`, `netalertx`, `beszel`, `power`, `net` `.lan` → 192.168.0.250, plus `router.lan` | Pi-hole `dns.hosts` | Easy addresses | `docker exec pihole pihole-FTL --config dns.hosts '[]'` |
