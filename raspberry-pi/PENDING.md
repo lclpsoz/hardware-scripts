@@ -1,75 +1,79 @@
 # Pending things
 
-What is still open on the Pi, in priority order. Updated 2026-11-21 (after the encrypted DNS, blocklist, naming and netq work). Finished work is in [CHANGES.md](CHANGES.md); background and evidence are in the numbered docs.
+What is still open on the Pi and the laptop-side services, in priority order. Updated 2026-11-21. Finished work is in [CHANGES.md](CHANGES.md); background and evidence are in the numbered docs.
 
-## 1. Wanted by the owner (priority)
+## 1. Needs the owner now
 
-### ntfy alerts: "I want this"
-
-Push notifications to the phone when something needs attention. [ntfy](https://ntfy.sh) is a small push service: a script sends an HTTP request to a topic, and the phone app shows it.
-
-Proposed alerts (each one is one condition in a small script on the Pi, or a NetAlertX notification setting):
-
-| Alert | Source |
+| Item | What to do |
 | --- | --- |
-| Internet down, or DNS failures above 10% | netq status (`/api/summary` on 127.0.0.1:8098) |
-| A new, unnamed device joined | NetAlertX (it has an ntfy notification plugin) |
-| A container stopped or unhealthy | `docker ps` check every few minutes |
-| Undervoltage event | the flight recorder's `events.jsonl` |
-| Backup failed or is older than 2 days | the backup job (see next item) |
+| **Phone: ntfy app** | Install ntfy, add the server `http://ntfy.lan`, subscribe to the topic, allow background use ([11-notifications.md](11-notifications.md#set-up-the-phone-once)). Until then the alerts and backup messages go nowhere. The topic is in `~/.config/pi-ops/config` on the laptop. |
+| **Check that notifications arrive** | After subscribing, the "Test from laptop", "Pi alerts started" and "Pi backup OK" messages should show. |
+| NetAlertX "new device" alert | Enabled but not yet seen working: it fires when the next unknown device joins. Tell me if it doesn't. |
 
-Decisions needed:
+## 2. Wanted by the owner (done, watch it)
 
-- **Where the server lives:** the public `ntfy.sh` with a long random topic name (simplest; anyone who learns the name can read and publish, so keep it secret), or a self-hosted ntfy container on the Pi (about 20 MB of RAM; the phone then needs a way to reach it away from home, for example Tailscale).
-- **Which alerts** from the table, and quiet hours.
+- **ntfy alerts**: done 2026-11-21 ([11-notifications.md](11-notifications.md)). Covers services, DNS, internet (netq), encrypted DNS, undervoltage and the flight recorder, backup age, Pi-hole messages (DNS limit and others), updates, system health, reboots, and new devices. Tune the thresholds after a week of real use.
+- **Daily backup with notification**: done 2026-11-21, to the laptop, 14 kept ([laptop/README.md](laptop/README.md)). A **second copy off the laptop** (USB drive or an encrypted cloud copy) is not done: decide whether you want one.
 
-### Scheduled backup: "I want this"
-
-[scripts/backup-pi.sh](scripts/backup-pi.sh) works but only runs when started by hand, and the only copy is on the laptop.
-
-Proposed: run it automatically, keep the last 14, and keep a second copy somewhere else. The backups contain private data (Pi-hole history, device list, keys), so a copy that leaves the laptop should be encrypted first (for example with `age`).
-
-Decisions needed:
-
-- **When and where it runs:** a laptop timer (catches up when the laptop was off), or a job on the Pi that pushes to the laptop.
-- **Second copy:** an external USB drive, a cloud bucket (for example through `rclone`), or none for now.
-- **Alert** on failure, through ntfy above.
-
-### HTTPS for Pi-hole (question asked)
-
-See [07-services.md](07-services.md#https-for-the-lan-names). Waiting on a choice.
-
-## 2. Waiting on something outside the Pi
+## 3. Waiting on something outside
 
 | Item | Waiting for | Then |
 | --- | --- | --- |
 | New power supply | It arriving | Reboot, run [the step load test](scripts/uv-step-load-test.sh), then lift limits in order: CPU governor, NetAlertX `cpus` 1.0, dpkg quota ([04](04-resource-limits.md)). Then the 4 pending package upgrades. |
-| Flight recorder | The next undervoltage event | Read `/var/log/uv-flight/events.jsonl` to see what ran in the minute before ([01](01-undervoltage.md)) |
+| Flight recorder | The next undervoltage event | It notifies you; read `/var/log/uv-flight/events.jsonl` for the minute before ([01](01-undervoltage.md)) |
 | Blocklist experiments (HaGeZi Pro is on) | Owner's feedback on broken sites | Allow the names that break; check `*.on.aws` and BetterStack from the work laptop |
-| Pi-hole limits (rate limit 1000/min, 150 concurrent) | About a week with the new list, around 2026-11-27 | Compare warnings and netq charts; if still hit, raise to 5000 and 512 ([02](02-pihole.md#8-can-the-limits-go-up-follow-up-2026-11-20-evening)) |
+| Pi-hole limits (rate limit 1000/min, 150 concurrent) | About a week with the new list, around 2026-11-27 | Pi-hole now notifies you when the limit is hit. Compare with the netq charts; if still hit, raise to 5000 and 512 ([02](02-pihole.md#8-can-the-limits-go-up-follow-up-2026-11-20-evening)) |
 | Encrypted DNS | A week of data on net.lan | Compare the weeks before and after 2026-11-20 22:07 ([08](08-internet-quality.md), [09](09-encrypted-dns.md)) |
 | TV | Next time it is used | Confirm it works with `pool.ntp.org` allowed; `time.samsungcloudsolution.com` stays blocked |
 | Router DHCP reservations | Owner configuring them | Set the static-IP flag in NetAlertX for the tablet and phones |
 
-## 3. Decisions and how-tos
+## 4. Decisions and how-tos
 
 - **Root access:** decided 2026-11-21: **no sudo for the assistant** for now. Root changes are prepared as a script (like `apply-root-changes.sh`) and run by the owner.
-- **SSH password login** (open, "how?" answered in [05](05-system-health.md#how-to-turn-off-ssh-password-login)): key login already works, so password login is only an extra way in.
-- **NetAlertX password** (open, answered in [05](05-system-health.md#how-to-set-a-netalertx-password)): the password feature exists but is off, and its default password, if enabled, is the well-known `123456`.
+- **SSH password login** (open): [how to turn it off](05-system-health.md#how-to-turn-off-ssh-password-login). Key login already works, so the password is only an extra way in.
+- **NetAlertX password** (open): [how to set it](05-system-health.md#how-to-set-a-netalertx-password). It is off, and the default if enabled is the well-known `123456`.
 - **NetAlertX network tree:** optional; attach each device to the router in the Network tab.
 
-## 4. Proposed, not scheduled
+## 5. Future services (not started)
+
+### Speed-test client: the Pi asks the laptop for a full speed test
+
+**Why:** the Pi's own speed test is capped by its 100 Mbps Ethernet port and its 600 MHz CPU (about 94 Mbps at best), so it can't show what the line really delivers. The laptop can. A good measurement also needs the context at the moment of the test.
+
+**What it should do** (the owner's request, to be refined when it is built):
+
+1. **The Pi can request a test from the laptop.** For example a button on net.lan ("Run laptop speed test") and an optional schedule.
+2. **The laptop runs a full-speed test** (download, upload, latency under load) with no Pi cap.
+3. **At the same moment it records the network health around the test:**
+   - **Wi-Fi:** the connected network and band, signal strength, link rate, retries.
+   - **Ethernet:** link speed, duplex and error counters, if cabled.
+   - **Quality:** latency, jitter and packet loss to the router, the ISP gateway and Cloudflare during the test.
+   - **qBittorrent:** whether it is running, and how much it is downloading and uploading **at the same time as the test**, so a low result can be explained ("torrents used 70 Mbps") instead of blamed on the line.
+4. **The result goes back to the Pi:** shown on net.lan next to the Pi's own tests (marked as "laptop"), with the context, and optionally a short ntfy message ("Laptop speed test: 480 / 95 Mbps, qBittorrent downloading at 60 Mbps").
+
+**How it would fit the existing pieces:**
+
+- Lives in [laptop/services/](laptop/README.md) as `speedtest/` (its own `run.sh`, systemd user units), using the shared `notify`, `pi` and `state` helpers.
+- The laptop can't be reached from the Pi reliably (it moves, it sleeps), so the **laptop asks the Pi**: it polls a small endpoint on net.lan every minute or two for "a test was requested", runs it, and posts the result back. When the laptop is off the request simply waits (and expires).
+- Needs a new small endpoint in netq (request, result) and a "laptop" series on the speed chart.
+- Tools to evaluate: the Cloudflare speed endpoints netq already uses (no account), `iperf3` to the Pi (limited by the Pi's port, so not for the line), Ookla's or LibreSpeed's CLI; `iw`/`nmcli`/`ethtool` for the link; qBittorrent's Web API (`/api/v2/transfer/info`) for the rates and process check for "running".
+
+**Open questions for then:** which test tool; whether to pause the torrents for a second "clean" run; whether to run on a schedule or only on request; what happens on battery or away from home.
+
+*This is a planned example of a future service for the laptop framework. Nothing is built yet.*
+
+## 6. Proposed, not scheduled
 
 - Docker log rotation defaults (`/etc/docker/daemon.json`), Pi-hole `database.maxDBdays` 30 (the database is 86 MB), slower container healthchecks.
-- Tailscale for remote access and real HTTPS certificates ([06](06-ideas.md)).
-- netq: Pi-hole concurrency warnings on the page (needs a read-only Pi-hole app password).
+- Tailscale for remote access: it would also let ntfy reach the phone away from home, and give real HTTPS certificates ([06](06-ideas.md)).
+- **HTTPS for the `.lan` names** ("we will see when"): options and downsides in [07-services.md](07-services.md#https-for-the-lan-names). Not planned now.
 - Other ideas in [06-ideas.md](06-ideas.md).
 
-## 5. Decided and closed
+## 7. Decided and closed
 
 - TV name: "Samsung TV (Home)" is fine.
 - Ray's devices: no Guest group; named `Ray <model>` with owner Ray ([03](03-netalertx.md#device-naming-pattern-set-2026-11-20)).
 - HDMI: off, fine as it is.
 - Pi-hole limits: left open on purpose, see the table above.
 - Moving the dpkg-db-backup timer off midnight: **dropped.** It finishes in 5 seconds under its 20% CPU quota, and only 3 of the 52 recorded undervoltage events happened in the midnight hour, so it isn't a real cause.
-- Housekeeping from the repo: this folder has 40+ commits on `main`, not pushed; the repo is public, so check before pushing.
+- Housekeeping: this repo has many commits on `main`, not pushed; it is public, so check before pushing.

@@ -10,13 +10,14 @@ This folder holds:
 - the configuration that runs on the Pi ([pi/](pi/));
 - the change log ([CHANGES.md](CHANGES.md)).
 
-## Status on 2026-11-20, 22:15
+## Status on 2026-11-21
 
 | Area | State |
 | --- | --- |
 | Power | Still marginal: 20 undervoltage events during today's upgrade alone. The CPU stays limited until the new supply arrives and passes [the load test](scripts/uv-step-load-test.sh). |
 | Ad blocking | StevenBlack plus HaGeZi Pro for every device, with a work allowlist (320,161 domains, applied 22:08) ([10](10-ad-blocking.md)) |
 | NetAlertX | **Fixed:** pages went from 14-40 s to about 1.3 s ([03](03-netalertx.md)) |
+| Notifications | **New:** ntfy at `ntfy.lan`, alerts from the Pi, NetAlertX and a daily laptop backup ([11](11-notifications.md)). Phone setup still needed. |
 | Names | **New:** `home.lan`, `pihole.lan`, `netalertx.lan`, `beszel.lan`, `power.lan`, `net.lan` ([07](07-services.md)) |
 | Internet quality | **New:** `net.lan`, measuring every minute; first speed test 59.7 / 42.0 Mbps, capped by the Pi ([08](08-internet-quality.md)) |
 | Pi-hole | Updated to core 6.6 / FTL 6.9. `DBinterval` 300. Upstream is now the encrypted forwarder ([09](09-encrypted-dns.md)). Rate limit and concurrency limit left as they are by choice, to be re-evaluated after some days with the new list ([02](02-pihole.md#8-can-the-limits-go-up-follow-up-2026-11-20-evening)). |
@@ -95,6 +96,8 @@ This folder holds:
 | [08-internet-quality.md](08-internet-quality.md) | netq: what it measures, speed-test limits, operations |
 | [09-encrypted-dns.md](09-encrypted-dns.md) | Encrypted upstream DNS: pros, cons, options, draft |
 | [10-ad-blocking.md](10-ad-blocking.md) | Blocking status, list comparison, what DNS can't block |
+| [11-notifications.md](11-notifications.md) | ntfy push alerts: what you get, phone setup, how it is built |
+| [laptop/](laptop/README.md) | Laptop-side services (daily backup, more later) with a shared framework |
 | [PENDING.md](PENDING.md) | **What is still open**, by priority, with what each item waits for |
 | [CHANGES.md](CHANGES.md) | Everything changed on the Pi, with undo |
 | [pi/](pi/) | What runs on the Pi: compose files, Pi-hole changed settings, systemd units, boot config (secrets redacted), plus the proxy, netq and NetAlertX patch that are deployed from here |
@@ -106,7 +109,7 @@ This folder holds:
 
 ## Backups
 
-`bash raspberry-pi/scripts/backup-pi.sh` saves everything that isn't reproducible from this repo to `~/backups/rasp-al-gaib-lite/<timestamp>/` on the laptop. That folder is outside the repo because it holds private data (Pi-hole history, device list, keys). It takes about a minute, runs at the lowest priority, and verifies the archives and both Pi-hole databases at the end. The first run produced 33 MB.
+The backup now runs by itself every day from the laptop ([laptop/README.md](laptop/README.md)). `bash raspberry-pi/scripts/backup-pi.sh` is the script it calls, and saves everything that isn't reproducible from this repo to `~/backups/rasp-al-gaib-lite/<timestamp>/` on the laptop. That folder is outside the repo because it holds private data (Pi-hole history, device list, keys). It takes about a minute, runs at the lowest priority, and verifies the archives and both Pi-hole databases at the end. The first run produced 33 MB.
 
 | File | Restores |
 | --- | --- |
