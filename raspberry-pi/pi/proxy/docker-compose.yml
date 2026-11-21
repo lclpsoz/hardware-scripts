@@ -1,0 +1,32 @@
+# Reverse proxy for the .lan names (http://home.lan and friends).
+# Deployed to ~/proxy on the Pi. Docs: raspberry-pi/07-services.md
+services:
+  proxy:
+    container_name: proxy
+    image: nginx:stable-alpine
+    # Skip the image's entrypoint scripts: they try to rewrite the default
+    # config, which this read-only container does not use.
+    entrypoint: ["nginx", "-g", "daemon off;"]
+    network_mode: host
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - SETUID
+      - SETGID
+      - CHOWN
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./www:/srv/home:ro
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+    mem_limit: 32m
+    cpus: "0.25"
+    logging:
+      driver: json-file
+      options:
+        max-size: 1m
+        max-file: "2"
+    restart: unless-stopped

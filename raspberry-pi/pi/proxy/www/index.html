@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home services</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23c2185b'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='white' stroke-width='3'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f6f6f4; --card: #ffffff; --text: #1d1d1b; --muted: #6b6b66;
+    --line: #e2e2dc; --accent: #c2185b; --ok: #2e7d32; --bad: #c62828; --wait: #9e9e99;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151514; --card: #1f1f1d; --text: #ecece8; --muted: #a3a39c;
+            --line: #33332f; --accent: #f06292; --ok: #66bb6a; --bad: #ef5350; --wait: #77776f; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 28px 16px 40px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 22px; font-size: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+  a.card { display: block; background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+           padding: 14px 16px; color: inherit; text-decoration: none; transition: border-color .15s; }
+  a.card:hover, a.card:focus-visible { border-color: var(--accent); outline: none; }
+  .top { display: flex; align-items: center; gap: 8px; }
+  .name { font-weight: 600; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--wait); flex: none; }
+  .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); }
+  .what { color: var(--muted); font-size: 14px; margin: 4px 0 8px; }
+  .url { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent); }
+  h2 { font-size: 15px; margin: 28px 0 8px; color: var(--muted); font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td { padding: 6px 4px; border-top: 1px solid var(--line); vertical-align: top; }
+  td:first-child { white-space: nowrap; color: var(--muted); }
+  code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  footer { margin-top: 26px; color: var(--muted); font-size: 13px; }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Home services</h1>
+  <p class="sub">Raspberry Pi <code>rasp-al-gaib-lite</code> · 192.168.0.250 · status refreshes every minute</p>
+
+  <div class="grid">
+    <a class="card" href="http://pihole.lan/admin/" data-check="http://pihole.lan/admin/">
+      <div class="top"><span class="dot"></span><span class="name">Pi-hole</span></div>
+      <div class="what">DNS and ad blocking for the whole network</div>
+      <div class="url">pihole.lan</div>
+    </a>
+    <a class="card" href="http://net.lan/" data-check="http://net.lan/api/summary">
+      <div class="top"><span class="dot"></span><span class="name">Internet quality</span></div>
+      <div class="what">Latency, packet loss, DNS times and speed tests</div>
+      <div class="url">net.lan</div>
+    </a>
+    <a class="card" href="http://netalertx.lan/" data-check="http://netalertx.lan/">
+      <div class="top"><span class="dot"></span><span class="name">NetAlertX</span></div>
+      <div class="what">Devices on the network, new and offline alerts</div>
+      <div class="url">netalertx.lan</div>
+    </a>
+    <a class="card" href="http://beszel.lan/" data-check="http://beszel.lan/">
+      <div class="top"><span class="dot"></span><span class="name">Beszel</span></div>
+      <div class="what">CPU, memory, disk, temperature and containers</div>
+      <div class="url">beszel.lan</div>
+    </a>
+    <a class="card" href="http://power.lan/" data-check="http://power.lan/json">
+      <div class="top"><span class="dot"></span><span class="name">Power</span></div>
+      <div class="what">Undervoltage history of the Pi</div>
+      <div class="url">power.lan</div>
+    </a>
+    <a class="card" href="http://192.168.0.1/" data-check="http://192.168.0.1/">
+      <div class="top"><span class="dot"></span><span class="name">Router</span></div>
+      <div class="what">ISP router admin page (open it by IP)</div>
+      <div class="url">192.168.0.1</div>
+    </a>
+  </div>
+
+  <h2>If a name does not open</h2>
+  <table>
+    <tr><td>Browser searches instead</td><td>Type the full address once, for example <code>http://home.lan/</code>, then bookmark it.</td></tr>
+    <tr><td>Name does not resolve</td><td>The device is not using Pi-hole for DNS (VPN, work DNS or mobile data). Use the direct addresses below.</td></tr>
+    <tr><td>Direct addresses</td><td>Pi-hole <code>:8080/admin</code> · NetAlertX <code>:20211</code> · Beszel <code>:8090</code> · Power <code>:8099</code>, all on <code>192.168.0.250</code></td></tr>
+    <tr><td>SSH</td><td><code>ssh lclpsoz@pi.lan</code></td></tr>
+  </table>
+
+  <footer>Configuration and docs: the <a href="https://github.com/lclpsoz/hardware-scripts/tree/main/raspberry-pi">raspberry-pi folder</a> of the hardware repo.</footer>
+</main>
+<script>
+  // Each card's dot shows whether its service answered. Cross-origin requests use
+  // no-cors, so any HTTP answer counts as "up"; a network error or a 4 s timeout is "down".
+  async function check(card) {
+    const dot = card.querySelector('.dot');
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 4000);
+    try {
+      await fetch(card.dataset.check, { mode: 'no-cors', cache: 'no-store', signal: ctrl.signal });
+      dot.className = 'dot ok'; dot.title = 'answering';
+    } catch (e) {
+      dot.className = 'dot bad'; dot.title = 'not answering';
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  function checkAll() { document.querySelectorAll('[data-check]').forEach(check); }
+  checkAll();
+  setInterval(checkAll, 60000);
+</script>
+</body>
+</html>
