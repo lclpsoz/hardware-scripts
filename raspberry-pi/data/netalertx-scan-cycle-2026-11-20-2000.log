@@ -1,0 +1,194 @@
+20:00:50 [resource_history] psutil sampling failed, using zeros: (pid=205)
+20:00:50 [Scheduler] run for ARPSCAN: YES
+20:00:50 [Plugin utils] ---------------------------------------------
+20:00:50 [Plugin utils]  display_name :  Arp-Scan (Network scan)
+20:00:50 [Plugins] Executing: python3 /app/server/plugins/arp_scan/script.py userSubnets={subnets}
+20:01:01 [ARPSCAN] In script 
+20:01:01 [ARPSCAN] userSubnetsParam:  192.168.0.0/24 --interface=eth0
+20:01:01 [Database] Opening DB
+20:01:01 [ARPSCAN] userSubnets:  ['192.168.0.0/24 --interface=eth0']
+20:01:17 [Plugins] Output: [plugin_helper] reading config file
+20:01:01 [ARPSCAN] In script 
+20:01:01 [ARPSCAN] userSubnetsParam:  192.168.0.0/24 --interface=eth0
+20:01:01 [Database] Opening DB
+20:01:01 [ARPSCAN] userSubnets:  ['192.168.0.0/24 --interface=eth0']
+20:01:15 [ARPSCAN] arpscan_output:  Interface: eth0, type: EN10MB, MAC: xx:xx:xx:xx:xx:xx, IPv4: 192.168.0.250
+20:01:15 [ARPSCAN] All devices List len: 4
+20:01:15 [ARPSCAN] Devices List: [{'ip': '192.168.0.1', 'mac': 'xx:xx:xx:xx:xx:xx', 'hw': 'zte corporation', 'interface': '192.168.0.0/24 --interface=eth0'}, {'ip': '192.168.0.9', 'mac': 'xx:xx:xx:xx:xx:xx', 'hw': '(Unknown: locally administered)', 'interface': '192.168.0.0/24 --interface=eth0'}, {'ip': '192.168.0.5', 'mac': 'xx:xx:xx:xx:xx:xx', 'hw': '(Unknown)', 'interface': '192.168.0.0/24 --interface=eth0'}, {'ip': '192.168.0.2', 'mac': 'xx:xx:xx:xx:xx:xx', 'hw': 'Samsung Electronics Co.,Ltd', 'interface': '192.168.0.0/24 --interface=eth0'}]
+20:01:15 [ARPSCAN] Found: Devices without duplicates  4
+20:01:17 [Plugins] SUCCESS for ARPSCAN received 4 entries
+20:01:17 [Plugins] Processing        : ARPSCAN
+20:01:17 [Plugins] Should I update API (userUpdatedDevices): False
+20:01:17 [Scheduler] run for INTRNT: YES
+20:01:17 [Plugin utils] ---------------------------------------------
+20:01:17 [Plugin utils]  display_name :  Internet-Check
+20:01:17 [Plugins] Executing: python3 /app/server/plugins/internet_ip/script.py prev_ip={prev_ip} INTRNT_DIG_GET_IP_ARG={INTRNT_DIG_GET_IP_ARG}
+20:01:27 [Plugins] Output: [plugin_helper] reading config file
+20:01:25 [INTRNT] In script
+20:01:25 [INTRNT] INTRNT_DIG_GET_IP_ARG:  -4 myip.opendns.com @resolver1.opendns.com
+20:01:25 [INTRNT] - Retrieving internet IP
+20:01:26 [INTRNT]  DIG result : <public-ip>
+20:01:26 [INTRNT]  Current internet_IP : <public-ip>
+20:01:26 [INTRNT]          previous_IP : <public-ip>
+20:01:26 [INTRNT] Finished 
+20:01:27 [Plugins] SUCCESS for INTRNT received 1 entries
+20:01:27 [Plugins] Processing        : INTRNT
+20:01:27 [Plugins] Should I update API (userUpdatedDevices): False
+20:01:27 [Scheduler] run for CSVBCKP: NO
+20:01:27 [Scheduler] run for DBCLNP: NO
+20:01:27 [Scheduler] run for MAINT: NO
+20:01:27 [Scheduler] run for VNDRPDT: NO
+20:01:27 [Process Scan]  Processing scan results
+20:01:27 [Process Scan]  Exclude ignored devices
+20:01:27 [Process Scan] Print Stats
+20:01:27 [Scan Stats] Devices Detected.......: 6
+20:01:27 [Scan Stats] New Devices............: 0
+20:01:27 [Scan Stats] Down Alerts............: 0
+20:01:27 [Scan Stats] New Down Alerts........: 0
+20:01:27 [Scan Stats] New Connections........: 13
+20:01:27 [Scan Stats] Disconnections.........: 0
+20:01:27 [Scan Stats] IP Changes.............: 0
+20:01:28 [Scan Stats] Scan Method Statistics:
+20:01:28     ARPSCAN: 4
+20:01:28     INTRNT: 1
+20:01:28     local_MAC: 1
+20:01:28 [Process Scan] Stats end
+20:01:28 [Process Scan] Sessions Events (connect / disconnect)
+20:01:28 [Process Scan] Creating new devices
+20:01:28 [Process Scan] Updating Devices Info
+20:01:28 [Process Scan] Updating Sync Hub Node
+20:01:28 [Process Scan] Updating devLastConnection from CurrentScan
+20:01:28 [Process Scan] Updating Presence from CurrentScan
+20:01:28 [Process Scan] Updating NICs presence
+20:01:28 [Process Scan] Updating forced presence
+20:01:28 [Process Scan] Updating Vendors
+20:01:28 [Process Scan] Updating v4 and v6 IPs
+20:01:28 [Process Scan] Guessing Icons
+20:01:28 [Process Scan] Pairing session events (connection / disconnection) 
+20:01:28 [Process Scan] Creating sessions snapshot
+20:01:28 [Process Scan] Inserting scan results into Online_History
+20:01:28 [Process Scan] Skipping repeated notifications
+20:01:28 [Skip Repeated Notifications] Skip Repeated
+20:01:28 [resource_history] psutil sampling failed, using zeros: (pid=205)
+20:01:28 [Notification] Check if something to report
+20:01:28 [Notification] Included sections:  ['new_devices', 'down_devices', 'events']
+20:01:28 [Notification] Open text Template
+20:01:28 [Notification] Open html Template
+20:01:28 [Notification] new_devices section done.
+20:01:28 [Notification] down_devices section done.
+20:01:28 [Notification] down_reconnected section done.
+20:01:28 [Notification] events section done.
+20:01:28 [Notification] plugins section done.
+20:01:28 [Send API] Updating notification_* files in  /tmp/api/
+20:01:28 [Notification] Udating API files
+20:01:29 [Notification] Notifications changes:  0
+20:01:29 [MAIN] Process: Idle
+20:01:29 [WF] Processing event with GUID a73d6d31-d310-4411-b23f-50a12bdbe788
+20:01:29 [WF] Processing event with GUID 39df62d6-26ef-4b85-a89a-c1137f7b5525
+20:01:29 [WF] Processing event with GUID 1782068e-5e7e-4b12-8f73-bc0cb273f681
+20:01:29 [WF] Processing event with GUID c83c2692-15c6-46d5-b873-53d4b1b97897
+20:01:29 [WF] Processing event with GUID 6f818ac3-c4f4-4237-b4b3-ce16adc7fe20
+20:01:29 [WF] Processing event with GUID 7503e9dc-0552-42d6-ad46-07ec7dc16df5
+20:01:29 [WF] Processing event with GUID c7627a7d-a937-46b3-9eeb-3ca8d878b431
+20:01:29 [WF] Processing event with GUID 0a7e37ee-36b9-4c0a-ab4c-0e5f4a181643
+20:01:29 [WF] Processing event with GUID a90834da-037d-46dc-bc2e-2e22238d3088
+20:01:29 [WF] Processing event with GUID 8d504e60-e12a-4f32-be1d-3a51ea19b857
+20:01:29 [WF] Processing event with GUID 40b5b412-1403-4361-9906-ad93bc210ee1
+20:01:29 [WF] Processing event with GUID 7109bc85-090f-4e8a-9e0c-710a5ec5f734
+20:01:29 [WF] Processing event with GUID 1e0f6506-71d3-45df-aad5-028b8ab92039
+20:01:29 [WF] Processing event with GUID 7484db8b-db8d-46a4-b48f-8ed27528fde3
+20:01:29 [WF] Processing event with GUID 10986439-1342-448e-b878-cb5d4a49acb9
+20:01:29 [WF] Processing event with GUID e138b214-7243-4a1b-bb9b-f554ed8a0f19
+20:01:29 [WF] Processing event with GUID 979668b2-93f6-4929-986c-6334b5130158
+20:01:29 [WF] Processing event with GUID 54f621a3-50dc-4647-9beb-d903ab64929b
+20:00:58 [Plugins] Output: [plugin_helper] reading config file
+20:00:56 [INTRNT] In script
+20:00:57 [INTRNT] INTRNT_DIG_GET_IP_ARG:  -4 myip.opendns.com @resolver1.opendns.com
+20:00:57 [INTRNT] - Retrieving internet IP
+20:00:57 [INTRNT]  DIG result : <public-ip>
+20:00:57 [INTRNT]  Current internet_IP : <public-ip>
+20:00:57 [INTRNT]          previous_IP : <public-ip>
+20:00:57 [INTRNT] Finished 
+20:00:58 [Plugins] SUCCESS for INTRNT received 1 entries
+20:00:58 [Plugins] Processing        : INTRNT
+20:00:58 [Plugins] Should I update API (userUpdatedDevices): False
+20:00:59 [Scheduler] run for CSVBCKP: NO
+20:00:59 [Scheduler] run for DBCLNP: NO
+20:00:59 [Scheduler] run for MAINT: NO
+20:00:59 [Scheduler] run for VNDRPDT: NO
+20:00:59 [Process Scan]  Processing scan results
+20:00:59 [Process Scan]  Exclude ignored devices
+20:00:59 [Process Scan] Print Stats
+20:00:59 [Scan Stats] Devices Detected.......: 6
+20:00:59 [Scan Stats] New Devices............: 0
+20:00:59 [Scan Stats] Down Alerts............: 0
+20:00:59 [Scan Stats] New Down Alerts........: 0
+20:00:59 [Scan Stats] New Connections........: 14
+20:00:59 [Scan Stats] Disconnections.........: 0
+20:00:59 [Scan Stats] IP Changes.............: 0
+20:00:59 [Scan Stats] Scan Method Statistics:
+20:00:59     ARPSCAN: 4
+20:00:59     INTRNT: 1
+20:00:59     local_MAC: 1
+20:00:59 [Process Scan] Stats end
+20:00:59 [Process Scan] Sessions Events (connect / disconnect)
+20:00:59 [Process Scan] Creating new devices
+20:00:59 [Process Scan] Updating Devices Info
+20:01:00 [Process Scan] Updating Sync Hub Node
+20:01:00 [Process Scan] Updating devLastConnection from CurrentScan
+20:01:00 [Process Scan] Updating Presence from CurrentScan
+20:01:00 [Process Scan] Updating NICs presence
+20:01:00 [Process Scan] Updating forced presence
+20:01:00 [Process Scan] Updating Vendors
+20:01:00 [Process Scan] Updating v4 and v6 IPs
+20:01:00 [Process Scan] Guessing Icons
+20:01:00 [Process Scan] Pairing session events (connection / disconnection) 
+20:01:00 [Process Scan] Creating sessions snapshot
+20:01:00 [Process Scan] Inserting scan results into Online_History
+20:01:00 [Process Scan] Skipping repeated notifications
+20:01:00 [Skip Repeated Notifications] Skip Repeated
+20:01:00 [resource_history] psutil sampling failed, using zeros: (pid=205)
+20:01:00 [Notification] Check if something to report
+20:01:00 [Notification] Included sections:  ['new_devices', 'down_devices', 'events']
+20:01:00 [Notification] Open text Template
+20:01:00 [Notification] Open html Template
+20:01:00 [Notification] new_devices section done.
+20:01:00 [Notification] down_devices section done.
+20:01:00 [Notification] down_reconnected section done.
+20:01:00 [Notification] events section done.
+20:01:00 [Notification] plugins section done.
+20:01:00 [Send API] Updating notification_* files in  /tmp/api/
+20:01:00 [Notification] Udating API files
+20:01:01 [Notification] Notifications changes:  0
+20:01:01 [MAIN] Process: Idle
+20:01:01 [WF] Processing event with GUID eb7cbc53-e066-43bf-8e58-0be9eea6960f
+20:01:01 [WF] Processing event with GUID 1c868163-d6bf-4a00-8e34-1f38c8bc3c14
+20:01:01 [WF] Processing event with GUID 41d11650-bb9c-4403-b12c-96ed4b848632
+20:01:01 [WF] Processing event with GUID cfe788cf-0033-4159-aa7d-4bed8390a0ad
+20:01:01 [WF] Processing event with GUID cd75e510-af93-4c6c-8294-12a79e1944ac
+20:01:01 [WF] Processing event with GUID 574031d0-b6dc-4fca-b650-bf9858682498
+20:01:01 [WF] Processing event with GUID 8847d822-e0be-48d7-9125-c7fdfbc00164
+20:01:01 [WF] Processing event with GUID 254670d5-875b-42a6-b193-ac76bf791a2e
+20:01:01 [WF] Processing event with GUID 9e2af9e3-adde-4caa-97a9-045eadc6856d
+20:01:01 [WF] Processing event with GUID 55424c65-0053-4a05-a9f8-07e71e5deb13
+20:01:01 [WF] Processing event with GUID 832ce617-d90c-4bfc-97fc-0cf9fa4dc520
+20:01:01 [WF] Processing event with GUID 415c55b6-2788-4f29-97d8-5d58396b9b6c
+20:01:01 [WF] Processing event with GUID e3422562-6e73-4c4e-9b39-4a3ec7458429
+20:01:01 [WF] Processing event with GUID 6530ece8-a781-4e92-a964-03a39a2eb5db
+20:01:01 [WF] Processing event with GUID 89ead721-121d-4254-b032-a6e004e0bfdd
+20:01:01 [WF] Processing event with GUID 45b8249a-02d8-4165-9932-ab7641bb4508
+20:01:01 [WF] Processing event with GUID ee879b8b-8b11-4300-b41e-6211d2223596
+20:01:01 [WF] Processing event with GUID db3a74ee-b370-4521-b970-16f82f0df846
+20:01:01 [WF] Processing event with GUID ee3d6d73-1544-4847-b46a-2c31bbfdd417
+20:01:23 [resource_history] psutil sampling failed, using zeros: (pid=205)
+20:01:23 [Scheduler] run for ARPSCAN: NO
+20:01:23 [Scheduler] run for INTRNT: NO
+20:01:23 [Scheduler] run for CSVBCKP: NO
+20:01:23 [Scheduler] run for DBCLNP: NO
+20:01:23 [Scheduler] run for MAINT: NO
+20:01:23 [Scheduler] run for VNDRPDT: NO
+20:01:23 [resource_history] psutil sampling failed, using zeros: (pid=205)
+20:01:23 [Notification] Check if something to report
+20:01:23 [Notification] Included sections:  ['new_devices', 'down_devices', 'events']
+20:01:23 [Notification] No changes to report
+20:01:23 [MAIN] Process: Idle
