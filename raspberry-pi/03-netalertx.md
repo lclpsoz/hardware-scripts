@@ -9,6 +9,31 @@ Checked 2026-11-20, read-only. NetAlertX v26.10.28 (the latest release, 28 Oct),
 
 Device count and database size have nothing to do with it: the database is only 3.9 MB.
 
+## Update 2026-11-20 20:51: patch applied
+
+The patched `lang.php` is mounted read-only over the original (`~/netalertx/docker-compose.yml`, option A below). The CPU limit and the 600 MHz clock are unchanged.
+
+| Page | Before | After |
+| --- | --- | --- |
+| Devices | 16.5-17.3 s | **1.1-1.4 s**, 0.34 s through `netalertx.lan` once warm |
+| Network | 13.8 s | 1.1 s |
+| Events | 25.8 s | 1.2 s |
+| Presence | 23.1 s | 1.4 s |
+| Settings | 20.5 s | 1.3-1.7 s |
+| Maintenance | over 40 s | 1.4 s |
+
+**Risks of this optimization, and how they are covered:**
+
+| Risk | Likelihood | Cover |
+| --- | --- | --- |
+| The patch breaks a page | Very low | Lint passed. Output identical for the keys tested. Every page returned 200 after the switch. Rollback is one command. |
+| An image update changes upstream `lang.php`, and the override hides that change | Low, but certain to need a look at each update | `pi-checkup.sh` warns when the image ID differs from `ebce55cdbccc` (v26.10.28), the image the patch was made for. Compare upstream with [pi/netalertx/lang.php.v26.10.28.orig](pi/netalertx/lang.php.v26.10.28.orig) before keeping the override. |
+| Recreating the container clears its RAM logs and restarts its schedule | Certain, harmless | Device history lives in the `netalertx_data` volume and is kept |
+
+Rollback: `cd ~/netalertx && cp docker-compose.yml.bak-2026-11-20 docker-compose.yml && docker compose up -d`.
+
+**Settings showed a 500 error right after the restart. That was not the patch.** When the container starts, the backend has to write `/tmp/api/table_settings.json` before the Settings page can render. Under the half-core limit, start-up also runs `update_vendors.sh` (download and sort of the IEEE vendor list), so this took a few minutes. The same page returned 200 in 1.3 s once the backend had finished. Expect a slow first minute or two after every NetAlertX restart until the CPU limit is raised.
+
 ## Measurements
 
 Page timings, measured with `curl` on the Pi itself, so no network is involved:
