@@ -99,7 +99,7 @@ DEFAULTS = {
     # snooze buttons: [minutes, offered only while sitting under this many minutes (0 = always)]
     "snooze_opts": [[30, 90], [5, 110], [1, 0]],
     "phone_alarm": True,                # master switch for the phone alarms of the levels
-    "alarm_ring_s": 180,                # how long a Clock timer rings before it stops by itself: no new one starts sooner
+    "alarm_ring_s": 900,                # how long a Clock timer rings before it stops by itself: no new one starts sooner
     "loud_limit_min": 30,               # level 4 stays loud this long (0 = no limit), then only the quiet notification
     "backoff_max_s": 900,               # level 4 repeats double each time, up to this many seconds
     "alarm_package": "",                # Clock app that gets the timer request (blank = the phone's choice), e.g. com.google.android.deskclock
@@ -455,8 +455,11 @@ def alarm_due(now):
     if alarm_active(now):
         lvl = S["level_sent"]
         # never sooner than the timer needs to finish ringing (a Clock timer keeps going until it stops by itself)
-        base = max(SET["notif"][f"level{lvl}"]["alarm_repeat_s"], SET["alarm_ring_s"] + 10)
+        floor = SET["alarm_ring_s"] + 10
+        base = max(SET["notif"][f"level{lvl}"]["alarm_repeat_s"], floor)
         gap = max(S["l4_alarm_repeat"], base) if lvl == 4 else base
+        if S["last_alarm"] and now - S["last_alarm"] < floor:
+            return 0                                  # the previous timer may still be ringing, whatever the level
         if lvl != S["last_alarm_level"] or now - S["last_alarm"] >= gap:
             S["last_alarm"], S["last_alarm_level"] = now, lvl
             if lvl == 4:                              # back off: each alarm waits twice as long as the last

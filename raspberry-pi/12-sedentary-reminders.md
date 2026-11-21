@@ -71,11 +71,11 @@ The loop writes what it does to `~/steps-loop.log` on the phone (kept under abou
 
 If nobody moves for hours, level 4 would repeat forever (with the first settings: 180 ntfy sounds and about 54 timers per hour, about 1,400 notifications and 420 timers over a 9-hour day). Three rules prevent it (settings on the page):
 
-- **A new Clock timer never starts sooner than the previous one needs to finish ringing** (*A Clock timer rings for about*, default 180 s): a timer keeps counting past zero and ringing until it stops by itself, and each request makes a new timer.
+- **A new Clock timer never starts sooner than the previous one needs to finish ringing, whatever the level** (*A Clock timer rings for about*, default 900 s; the owner's timers were still going after 7 minutes, so this is a safe upper bound until measured): a timer keeps counting past zero and ringing until it stops by itself, and each request makes a new timer.
 - **Level 4 backs off**: each repeat of the notification and of the timer waits twice as long as the last, up to *Repeat waits grow up to* (default 900 s).
 - **Level 4 stays loud for 30 minutes** (*Level 4 stays loud for*, 0 = no limit). After that the phone alarms and the loud notifications stop, and only the quiet *Still sitting* notification (priority 2, every 15 min, editable under Notifications) repeats until you move. Moving enough and then sitting again re-arms everything.
 
-Simulated with a fake clock and the owner's settings, a 9-hour day away gives 15 loud notifications (levels 1-4), 29 quiet ones and 6 timers (3 at level 3, 3 at level 4), instead of about 1,390 notifications and 420 timers. The loud phase restarts if the `steps` container is restarted.
+Simulated with a fake clock and the owner's settings, a 9-hour day away gives 15 loud notifications (levels 1-4), 29 quiet ones and 3 timers (one at level 3, two at level 4, at least 15 minutes apart), instead of about 1,390 notifications and 420 timers. The loud phase restarts if the `steps` container is restarted.
 
 ## Lock screen
 
