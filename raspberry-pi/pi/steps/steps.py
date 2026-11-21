@@ -114,7 +114,7 @@ def read_json(name):
 def save_state():
     """Snooze and the time of the last movement, so a restart does not reset the sitting timer."""
     write_json("state.json", {"snooze_until": S["snooze_until"], "snooze_kind": S["snooze_kind"],
-                              "last_move": S["last_move"]})
+                              "last_move": S["last_move"], "saved_at": time.time()})
 
 
 def save_settings():
@@ -167,11 +167,17 @@ def load():
     ok, _ = validate(saved)
     SET.update(ok)
     lm, t = d.get("last_move"), time.time()
-    # keep the old timer unless it is in the future or older than the "phone silent" limit
-    # (the Pi was off for a long time: do not greet you with constant alarms)
-    if isinstance(lm, (int, float)) and 0 < t - lm <= SET["stale_min"] * 60:
+    try:
+        saved = float(d.get("saved_at") or os.path.getmtime(os.path.join(DATA, "state.json")))
+    except OSError:
+        saved = 0.0
+    # Keep the old timer however old it is (you may have sat for an hour). Drop it only when the
+    # service itself was down longer than the phone-silent limit (Pi off for hours): then we know nothing.
+    if isinstance(lm, (int, float)) and 0 < t - lm and 0 <= t - saved <= SET["stale_min"] * 60:
         S["last_move"] = lm
         log("sitting timer restored:", round((t - lm) / 60, 1), "min")
+    else:
+        log("sitting timer not restored (service was down", round((t - saved) / 60), "min)")
     rp = []
     try:
         with open(os.path.join(DATA, "reports.jsonl")) as f:
