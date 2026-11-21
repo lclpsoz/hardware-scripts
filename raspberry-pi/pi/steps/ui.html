@@ -179,9 +179,8 @@
         <label class="f">Steps that count as moving<input type="number" id="s_move_steps" min="10" max="5000"></label>
         <label class="f">…within (minutes)<input type="number" id="s_move_window_min" min="1" max="60"></label>
         <label class="f">Phone silent after (min)<input type="number" id="s_stale_min" min="5" max="240"></label>
-        <label class="f">"Walking now" pause (min)<input type="number" id="s_walking_snooze_min" min="1" max="60"></label>
       </div>
-      <p class="hint" style="margin-top:14px">Snooze buttons: minutes, and the sitting time under which each is offered (0 = always). A notification has room for 3 buttons: "Walking now" plus the two longest snoozes offered at that moment. This page shows all of them.</p>
+      <p class="hint" style="margin-top:14px">Snooze buttons: minutes, and the sitting time under which each is offered (0 = always). A notification shows up to 3 snooze buttons (the longest offered at that moment); this page shows all of them.</p>
       <div id="snzOpts"></div>
       <p class="hint" style="margin-top:14px">How often the phone sends its step count (the phone loop follows these, no change needed there):</p>
       <div class="form">
@@ -248,7 +247,7 @@ const MODES = { watching: 'watching', snoozed: 'snoozed', quiet: 'quiet hours', 
 
 const NOTIF_META = [
   ['level1', 'Level 1 · light', true], ['level2', 'Level 2 · mid', true], ['level3', 'Level 3 · high', true], ['level4', 'Level 4 · constant', true],
-  ['moved', 'Moved enough (timer reset)', false], ['snoozed', 'Snoozed (confirmation)', false], ['walking', '"Walking now" (confirmation)', false],
+  ['moved', 'Moved enough (timer reset)', false], ['snoozed', 'Snoozed (confirmation)', false],
   ['snooze_end', 'Snooze ended', false], ['silent', 'Phone silent', false]];
 const PRIOS = [[1, '1 · min (hidden)'], [2, '2 · low (silent)'], [3, '3 · default (sound)'], [4, '4 · high (+ vibration)'], [5, '5 · max (loudest)']];
 function field(label, input, cls) { const l = document.createElement('label'); l.className = 'f' + (cls ? ' ' + cls : ''); l.appendChild(document.createTextNode(label)); l.appendChild(input); return l; }
@@ -281,7 +280,7 @@ function fillForm(s) {
   s.levels_min.forEach((v, i) => $('l' + i).value = v);
   $('s_move_steps').value = s.move_steps;
   $('s_move_window_min').value = Math.round(s.move_window_s / 60); $('s_stale_min').value = s.stale_min;
-  $('s_walking_snooze_min').value = s.walking_snooze_min; $('s_phone_alarm').checked = s.phone_alarm;
+  $('s_phone_alarm').checked = s.phone_alarm;
   for (let i = 0; i < 4; i++) { const o = s.snooze_opts[i]; $('o' + i + 'm').value = o ? o[0] : ''; $('o' + i + 'b').value = o ? o[1] : ''; }
   $('s_report_idle_s').value = s.report_idle_s; $('s_report_walk_s').value = s.report_walk_s; $('s_walk_spm').value = s.walk_spm;
   $('s_quiet_enabled').checked = s.quiet_enabled; $('s_quiet_start').value = s.quiet_start; $('s_quiet_end').value = s.quiet_end;
@@ -304,7 +303,7 @@ function readForm() {
     levels_min: [0, 1, 2, 3].map(i => Number($('l' + i).value)),
     move_steps: Number($('s_move_steps').value),
     move_window_s: Number($('s_move_window_min').value) * 60, stale_min: Number($('s_stale_min').value),
-    walking_snooze_min: Number($('s_walking_snooze_min').value), phone_alarm: $('s_phone_alarm').checked, snooze_opts: opts,
+    phone_alarm: $('s_phone_alarm').checked, snooze_opts: opts,
     report_idle_s: Number($('s_report_idle_s').value), report_walk_s: Number($('s_report_walk_s').value), walk_spm: Number($('s_walk_spm').value),
     quiet_enabled: $('s_quiet_enabled').checked, quiet_start: $('s_quiet_start').value, quiet_end: $('s_quiet_end').value,
     notif
@@ -337,16 +336,15 @@ function render(d) {
 
   const snz = $('snz'); snz.textContent = '';
   const add = (label, fn, cls) => { const b = document.createElement('button'); b.textContent = label; if (cls) b.className = cls; b.onclick = fn; snz.appendChild(b); };
-  add('Walking now (' + s.walking_snooze_min + ' min)', async () => { try { await api('/walking', { method: 'POST' }); refresh(); } catch (e) { msg(e.message, 'err'); } });
   st.snooze_available.slice().sort((a, b) => a - b).forEach(m => add('Snooze ' + m + ' min', () => snooze(m)));
   if (st.mode === 'snoozed') add('Resume now', async () => { await api('/resume'); refresh(); }, 'primary');
-  $('snzNote').textContent = st.mode === 'snoozed' ? (st.snooze_kind === 'walking' ? 'Walking now: paused, ' : 'Snoozed, ') + Math.ceil(st.snooze_left_min) + ' min left. The sitting timer is paused and carries on afterwards.' : '';
+  $('snzNote').textContent = st.mode === 'snoozed' ? 'Snoozed, ' + Math.ceil(st.snooze_left_min) + ' min left. The sitting timer is paused and carries on afterwards.' : '';
 
   $('tSteps').textContent = t.steps.toLocaleString();
   const r = t.reminders; $('tRem').textContent = r[0] + r[1] + r[2] + r[3];
   $('tRemN').textContent = r[0] + ' light · ' + r[1] + ' mid · ' + r[2] + ' high · ' + r[3] + ' constant';
   $('tLong').textContent = Math.round(t.longest_min) + ' min';
-  $('tMoves').textContent = t.moves; $('tSnz').textContent = Object.values(t.snoozes).reduce((a, b) => a + b, 0) + ' snoozes (incl. walking now)';
+  $('tMoves').textContent = t.moves; $('tSnz').textContent = Object.values(t.snoozes).reduce((a, b) => a + b, 0) + ' snoozes';
   $('repNow').textContent = 'Right now the phone is asked to report every ' + st.report_every_s + ' s' + (st.walking ? ' (walking detected).' : '.') + ' The change reaches the phone after its next report.';
   $('tAge').textContent = fmtAge(st.last_sample_age_s); $('tCount').textContent = st.steps == null ? '' : 'counter ' + st.steps.toLocaleString();
 

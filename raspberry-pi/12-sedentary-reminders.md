@@ -17,16 +17,15 @@ A small container, `steps`, nags you through ntfy when your phone's step counter
 
   Android lets you give each priority its own sound (Settings → Apps → ntfy → Notifications): soft for 3, a clear two-tone for 4, the alarm tone for 5, with Do Not Disturb override on 5.
 - **Phone alarm** (level 4, switch on the page): the Pi's reply to each phone report says `"alarm": 1` while level 4 is active and nothing is snoozed. The Termux loop then sets the alarm volume to maximum, vibrates and speaks "Get up and walk now" on the alarm stream (`termux-volume`, `termux-vibrate`, `termux-tts-speak -s ALARM`). During level 4 the phone is asked to report as often as the level repeats (20 s). Not verified on the owner's phone yet.
-- **Buttons.** ntfy allows 3 buttons per notification, so a reminder has **Walking now** plus the two longest snoozes offered at that moment. Snoozes are 30, 15, 5 and 1 min, but the long ones go away as you sit longer: 30 min only below 90 min of sitting, 15 min below 105, 5 min below 110, and 1 min always (settings). The page shows all that are currently offered, and the Pi refuses a snooze that is not offered. Every snooze PAUSES the sitting timer: it is frozen and carries on from the same value afterwards (it is not reset). Real walking during a snooze still resets it.
-- **Walking now** pauses reminders for 5 minutes (setting) and marks you as walking, so the phone reports at the fast interval. If you really move enough meanwhile, the timer resets and the pause ends.
-- **Notifications.** Each type has its own title, message, priority and (for levels) repeat interval on the page, with a **Test** button: the four levels, "Moved enough, timer reset", snoozed, walking now, snooze ended and phone silent. Texts can use `{min}`, `{snooze}`, `{steps}` and `{stale}`. "Moved enough" is sent when you walk enough while a reminder was active.
+- **Buttons.** Every reminder has snooze buttons of **30, 5 and 1 min**, but the long ones go away as you sit longer: 30 min only below 90 min of sitting (1 h 30), 5 min below 110 (1 h 50), and 1 min always. These limits are settings. The page shows the ones currently offered, and the Pi refuses a snooze that is not offered. Every snooze PAUSES the sitting timer: it is frozen and carries on from the same value afterwards (it is not reset). Real walking during a snooze still resets it.
+- **Notifications.** Each type has its own title, message, priority and (for levels) repeat interval on the page, with a **Test** button: the four levels, "Moved enough, timer reset", snoozed, snooze ended and phone silent. Texts can use `{min}`, `{snooze}`, `{steps}` and `{stale}`. "Moved enough" is sent when you walk enough while a reminder was active.
 - No reminders from 22:00 to 07:00 (America/Sao_Paulo), and none while the phone has been silent for 30 min (you get one low-priority notice).
 
 All numbers are settings. They start from the optional values in `~/steps/config.env` (`LEVELS_MIN`, `REPEAT_S` for level 4, `MOVE_STEPS`, `QUIET_HOURS`) and are changed in the web page below, which wins once saved.
 
 ## Web page: http://steps.lan
 
-Shows the sitting timer with the reminder levels, the mode (watching, snoozed, quiet hours, no phone data), Walking now and snooze buttons, today's steps, reminders, longest sitting and how many times you got up, steps per hour, the last 14 days, and every setting (levels, step threshold and window, quiet hours, snooze lengths and when they are offered, the text, priority and repeat of every notification with a Test button, on/off).
+Shows the sitting timer with the reminder levels, the mode (watching, snoozed, quiet hours, no phone data), snooze buttons, today's steps, reminders, longest sitting and how many times you got up, steps per hour, the last 14 days, and every setting (levels, step threshold and window, quiet hours, snooze lengths and when they are offered, the text, priority and repeat of every notification with a Test button, on/off).
 
 - The page asks for the `STEPS_TOKEN` once and keeps it in the browser. The settings are saved in `~/steps/data/settings.json` and apply at once.
 - Stats are kept for a year in `~/steps/data/stats.json` and written at every phone report (and every 15 minutes).
@@ -48,7 +47,7 @@ Shows the sitting timer with the reminder levels, the mode (watching, snoozed, q
 
 ## Endpoints
 
-Token in `X-Token` or `?t=`. `/steps?steps=N`, `POST /snooze?min=15` (only lengths offered right now), `POST /walking`, `/resume`, `/status`, `/api/state`, `POST /api/settings`, `POST /api/test` (JSON `{"type": "level2"}`), `POST /api/debug/steps` and `POST /api/debug/sitting` (JSON `{"n": N}` and `{"min": M}`); `/`, `/health` and `/phone.sh` need no token.
+Token in `X-Token` or `?t=`. `/steps?steps=N`, `POST /snooze?min=5` (only lengths offered right now), `/resume`, `/status`, `/api/state`, `POST /api/settings`, `POST /api/test` (JSON `{"type": "level2"}`), `POST /api/debug/steps` and `POST /api/debug/sitting` (JSON `{"n": N}` and `{"min": M}`); `/`, `/health` and `/phone.sh` need no token.
 
 ## Phone setup
 
@@ -68,6 +67,6 @@ Token in `X-Token` or `?t=`. `/steps?steps=N`, `POST /snooze?min=15` (only lengt
 
 ## Limits
 
-- Only the phone is measured: if you leave it on the desk while walking, you get reminders anyway (press Walking now or a snooze, or carry it).
+- Only the phone is measured: if you leave it on the desk while walking, you get reminders anyway (press a snooze, or carry it).
 - The port is plain HTTP on the LAN, protected by the token only.
 - Undo: `cd ~/steps && docker compose down`.

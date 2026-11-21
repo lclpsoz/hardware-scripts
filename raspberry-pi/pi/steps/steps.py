@@ -5,7 +5,7 @@ The phone posts its cumulative step counter to /steps. If fewer than move_steps
 steps happen within move_window_s seconds, the "sitting" timer keeps running.
 Escalation (minutes sitting): level 1 light (ntfy prio 3), 2 mid (4), 3 high (5),
 4 constant (prio 5 every repeat_s seconds) until you walk.
-Snooze (1/5/15/30 min, long ones only while you have not sat too long) and "Walking now" PAUSE the
+Snooze (30/5/1 min, the long ones only while you have not sat too long) PAUSES the
 sitting timer; it carries on from where it was when the snooze ends.
 
 Settings (editable in the web page, saved to /data/settings.json) start from the
@@ -17,7 +17,6 @@ Endpoints (token in header X-Token or ?t=):
   GET  /steps?steps=N         phone reports its cumulative step counter; the reply says
                               {"next_s": seconds to wait} (normal or walking interval)
   POST /snooze?min=15         pause for one of the snooze lengths offered right now
-  POST /walking               "I'm walking now": pause a few minutes and report fast
   GET  /resume                cancel the snooze
   GET  /status                small JSON state
   GET  /api/state             everything the page shows
@@ -72,12 +71,11 @@ NOTIF_DEFAULTS = {
                "repeat_s": int(E("REPEAT_S", "20"))},
     "moved": {"title": "Good", "msg": "Moved enough, timer reset.", "prio": 1},
     "snoozed": {"title": "Snoozed", "msg": "Snoozed {snooze} min. The sitting timer is paused.", "prio": 1},
-    "walking": {"title": "Walking", "msg": "Walking now: reminders paused {snooze} min and the phone reports more often.", "prio": 1},
     "snooze_end": {"title": "Snooze ended", "msg": "Snooze over, the sitting timer continues at {min} min.", "prio": 2},
     "silent": {"title": "Steps: phone silent", "msg": "No step data from the phone for {stale} min; reminders paused.", "prio": 2},
 }
 TAGS = {"level1": "walking", "level2": "warning", "level3": "rotating_light", "level4": "rotating_light",
-        "moved": "tada", "snoozed": "zzz", "walking": "walking", "snooze_end": "alarm_clock", "silent": "warning"}
+        "moved": "tada", "snoozed": "zzz", "snooze_end": "alarm_clock", "silent": "warning"}
 DEFAULTS = {
     "enabled": True,
     "levels_min": [float(x) for x in E("LEVELS_MIN", "50,60,70,80").split(",")],
@@ -88,8 +86,7 @@ DEFAULTS = {
     "quiet_start": QS,
     "quiet_end": QE,
     # snooze buttons: [minutes, offered only while sitting under this many minutes (0 = always)]
-    "snooze_opts": [[30, 90], [15, 105], [5, 110], [1, 0]],
-    "walking_snooze_min": 5,            # the "Walking now" button: pause this long and report fast
+    "snooze_opts": [[30, 90], [5, 110], [1, 0]],
     "phone_alarm": True,                # at the last level the phone loop plays a loud alarm
     "notif": NOTIF_DEFAULTS,
     "report_idle_s": int(E("REPORT_IDLE_S", "60")),     # how often the phone should report normally
@@ -260,7 +257,6 @@ def validate(d):
     num("move_steps", 10, 5000)
     num("move_window_s", 60, 3600)
     num("stale_min", 5, 240)
-    num("walking_snooze_min", 1, 60)
     num("report_idle_s", 5, 600)
     num("report_walk_s", 2, 120)
     num("walk_spm", 5, 200)
@@ -341,13 +337,10 @@ def avail_snoozes(mins):
 
 
 def action_buttons(mins):
-    """ntfy allows 3 buttons: 'Walking now' plus the two longest snoozes available right now."""
+    """ntfy allows 3 buttons: the (up to 3) longest snoozes available right now."""
     def mk(label, path):
         return f"http, {label}, {PUBLIC}{path}, method=POST, headers.X-Token={TOKEN}, clear=true"
-    a = [mk("Walking now", "/walking")]
-    for m in avail_snoozes(mins)[:2]:
-        a.append(mk(f"{m} min", f"/snooze?min={m}"))
-    return "; ".join(a)
+    return "; ".join(mk(f"{m} min", f"/snooze?min={m}") for m in avail_snoozes(mins)[:3])
 
 
 def notify(msg, prio=3, title="Move!", tags="walking", mins=None):
@@ -375,7 +368,6 @@ def send(typ, **ctx):
     n = SET["notif"][typ]
     mins = sitting_min()
     ctx.setdefault("min", int(mins))
-    ctx.setdefault("snooze", SET["walking_snooze_min"])
     ctx.setdefault("stale", SET["stale_min"])
     ctx.setdefault("steps", S["steps"] or 0)
     try:
@@ -460,8 +452,6 @@ def add_sample(n, manual=False):
             if S["level_sent"] >= 1:
                 send("moved", steps=n - first)
             bump(lambda d: d.__setitem__("moves", d["moves"] + 1))
-            if S["snooze_kind"] == "walking":        # you did walk: the "walking now" pause is no longer needed
-                end_snooze(t)
             reset(t, f"{n - first} steps in {int(t - samples[0][0])}s")
             samples.clear()
             samples.append((t, n))
@@ -627,14 +617,6 @@ class H(BaseHTTPRequestHandler):
                     begin_snooze(m, "snooze", now)
                     send("snoozed", snooze=m)
                 return self.reply(200, {"snoozed_min": m})
-            if u.path == "/walking":
-                with lock:
-                    now = time.time()
-                    m = SET["walking_snooze_min"]
-                    begin_snooze(m, "walking", now)
-                    S["walk_until"] = now + m * 60          # the phone reports at the fast interval meanwhile
-                    send("walking", snooze=m)
-                return self.reply(200, {"walking_min": m})
             if u.path == "/resume":
                 with lock:
                     if S["snooze_until"]:
@@ -691,7 +673,7 @@ class H(BaseHTTPRequestHandler):
                 if typ not in SET["notif"]:
                     return self.reply(400, {"errors": ["unknown notification type"]})
                 with lock:
-                    send(typ, snooze=SET["walking_snooze_min"] if typ == "walking" else 5)
+                    send(typ, snooze=5)
                 return self.reply(200, {"ok": True})
         except (KeyError, ValueError, IndexError):
             return self.reply(400, {"error": "bad request"})
