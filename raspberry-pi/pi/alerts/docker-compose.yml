@@ -1,0 +1,28 @@
+# Watches the Pi and sends push notifications through the local ntfy server.
+# Docs: raspberry-pi/11-notifications.md
+services:
+  alerts:
+    container_name: alerts
+    image: python:3.13-alpine
+    network_mode: host              # probes services on 127.0.0.1
+    pid: host                       # read-only look at /proc to see whether the flight recorder runs
+    user: "1000:1000"
+    command: ["python", "-u", "/app/alerts.py"]
+    env_file: config.env            # NTFY_TOPIC (secret, not in the repo)
+    environment:
+      TZ: America/Sao_Paulo
+      NTFY_URL: http://127.0.0.1:2586
+    volumes:
+      - ./alerts.py:/app/alerts.py:ro
+      - ./data:/data                                                   # state and heartbeat
+      - /home/lclpsoz/pihole/etc-pihole/cli_pw:/run/secrets/pihole_cli_pw:ro   # Pi-hole API password
+      - /var/log/uv-flight:/uv-flight:ro                               # flight recorder events
+      - /home/lclpsoz/ops-state:/ops-state:ro                          # last-backup.json from the laptop
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 48m
+    cpus: "0.25"
+    restart: unless-stopped
