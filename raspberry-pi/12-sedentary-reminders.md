@@ -5,7 +5,7 @@ A small container, `steps`, nags you through ntfy when your phone's step counter
 ## How it works
 
 - The phone sends its cumulative step counter to `http://192.168.0.250:8097/steps` every 2 minutes ([phone/steps-report.sh](phone/steps-report.sh), run in Termux).
-- "Moved" means at least 40 steps within 5 minutes. That resets the sitting timer.
+- "Moved" means at least 200 steps within 5 minutes. That resets the sitting timer.
 - Escalation by minutes sitting: **50** light (ntfy priority 3), **60** mid (4), **70** high (5), **80+** constant (priority 5 every 20 s) until you walk.
 - Every reminder has two buttons: **Meeting 60m** and **Nap 30m**. Both pause reminders; the timer restarts when the pause ends.
 - No reminders from 22:00 to 07:00 (America/Sao_Paulo), and none while the phone has been silent for 30 min (you get one low-priority notice).
