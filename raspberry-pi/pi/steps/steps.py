@@ -80,11 +80,13 @@ NOTIF_DEFAULTS = {
                "alarm_mode": "timer", "alarm_text": "\U0001F6B6 Time to walk! Sitting {min} min", "alarm_volume": 50, "alarm_repeat_s": 60},
     "moved": {"title": "Good", "msg": "Moved enough, timer reset.", "prio": 1},
     "snoozed": {"title": "Snoozed", "msg": "Snoozed {snooze} min. The sitting timer is paused.", "prio": 1},
+    # After the loud phase of level 4 (loud_limit_min) all sound stops and this quiet one repeats instead.
+    "giveup": {"title": "Still sitting", "msg": "{min} min without moving. Sounds are paused until you move.", "prio": 2, "repeat_s": 900},
     "snooze_end": {"title": "Snooze ended", "msg": "Snooze over, the sitting timer continues at {min} min.", "prio": 2},
     "silent": {"title": "Steps: phone silent", "msg": "No step data from the phone for {stale} min; reminders paused.", "prio": 2},
 }
 TAGS = {"level1": "walking", "level2": "warning", "level3": "rotating_light", "level4": "rotating_light",
-        "moved": "tada", "snoozed": "zzz", "snooze_end": "alarm_clock", "silent": "warning"}
+        "moved": "tada", "snoozed": "zzz", "snooze_end": "alarm_clock", "giveup": "hourglass_flowing_sand", "silent": "warning"}
 DEFAULTS = {
     "enabled": True,
     "levels_min": [float(x) for x in E("LEVELS_MIN", "50,60,70,80").split(",")],
@@ -97,6 +99,9 @@ DEFAULTS = {
     # snooze buttons: [minutes, offered only while sitting under this many minutes (0 = always)]
     "snooze_opts": [[30, 90], [5, 110], [1, 0]],
     "phone_alarm": True,                # master switch for the phone alarms of the levels
+    "alarm_ring_s": 180,                # how long a Clock timer rings before it stops by itself: no new one starts sooner
+    "loud_limit_min": 30,               # level 4 stays loud this long (0 = no limit), then only the quiet notification
+    "backoff_max_s": 900,               # level 4 repeats double each time, up to this many seconds
     "alarm_package": "",                # Clock app that gets the timer request (blank = the phone's choice), e.g. com.google.android.deskclock
     "notif": NOTIF_DEFAULTS,
     "report_idle_s": int(E("REPORT_IDLE_S", "60")),     # how often the phone should report normally
@@ -108,6 +113,7 @@ SET = copy.deepcopy(DEFAULTS)
 
 lock = threading.Lock()
 S = {"last_move": time.time(), "snooze_start": 0.0, "snooze_until": 0.0, "snooze_kind": "", "last_sample": 0.0, "walk_until": 0.0, "stats_flush": 0.0, "alarm_test": 0, "last_alarm": 0.0, "last_alarm_level": 0,
+     "l4_since": 0.0, "l4_repeat": 0, "l4_alarm_repeat": 0, "quiet_phase": False,
      "stale_told": False, "level_sent": 0, "last_repeat": 0.0, "steps": None, "started": time.time()}
 samples = deque()
 stats = {}            # "YYYY-MM-DD" -> day record
@@ -273,6 +279,9 @@ def validate(d):
             out["alarm_package"] = pk
         else:
             err.append("alarm_package must be an Android package name such as com.google.android.deskclock (or empty)")
+    num("alarm_ring_s", 10, 1800)
+    num("loud_limit_min", 0, 1440)
+    num("backoff_max_s", 20, 3600)
     num("report_idle_s", 5, 600)
     num("report_walk_s", 2, 120)
     num("walk_spm", 5, 200)
@@ -433,6 +442,7 @@ def alarm_active(t):
     snoozed = S["snooze_until"] and t < S["snooze_until"]
     lvl = S["level_sent"]
     return bool(SET["phone_alarm"] and SET["enabled"] and lvl >= 1 and not snoozed and not in_quiet(t)
+                and not (lvl == 4 and S["quiet_phase"])
                 and SET["notif"][f"level{lvl}"]["alarm_mode"] != "off")
 
 
@@ -444,8 +454,13 @@ def alarm_due(now):
         return test
     if alarm_active(now):
         lvl = S["level_sent"]
-        if lvl != S["last_alarm_level"] or now - S["last_alarm"] >= SET["notif"][f"level{lvl}"]["alarm_repeat_s"]:
+        # never sooner than the timer needs to finish ringing (a Clock timer keeps going until it stops by itself)
+        base = max(SET["notif"][f"level{lvl}"]["alarm_repeat_s"], SET["alarm_ring_s"] + 10)
+        gap = max(S["l4_alarm_repeat"], base) if lvl == 4 else base
+        if lvl != S["last_alarm_level"] or now - S["last_alarm"] >= gap:
             S["last_alarm"], S["last_alarm_level"] = now, lvl
+            if lvl == 4:                              # back off: each alarm waits twice as long as the last
+                S["l4_alarm_repeat"] = max(base, min(gap * 2, SET["backoff_max_s"]))
             return lvl
     return 0
 
@@ -480,6 +495,7 @@ def reset(t, why):
     S["level_sent"] = 0
     S["last_repeat"] = 0.0
     S["last_alarm_level"] = 0
+    S["l4_since"], S["l4_repeat"], S["l4_alarm_repeat"], S["quiet_phase"] = 0.0, 0, 0, False
     save_state()
     log("timer reset:", why)
 
@@ -531,7 +547,7 @@ def next_report_s(t):
     snoozed = S["snooze_until"] and t < S["snooze_until"]
     first = (alarm_levels() or [0])[0]
     # the alarm can only sound when the phone reports: ask for fresh reports from 2 min before the first alarm level
-    if (first and SET["phone_alarm"] and SET["enabled"] and not snoozed and not in_quiet(t)
+    if (first and SET["phone_alarm"] and SET["enabled"] and not snoozed and not in_quiet(t) and not S["quiet_phase"]
             and (S["level_sent"] >= first - 1 or sitting_min(t) >= SET["levels_min"][first - 1] - 2)):
         n = min(n, 20)
     return n
@@ -542,6 +558,8 @@ def end_snooze(t):
     on from where it was. (If you really walked during the snooze, the timer was already reset.)"""
     if S["snooze_start"] and S["last_move"] < S["snooze_start"]:
         S["last_move"] += max(0.0, t - S["snooze_start"])
+        if S["l4_since"]:
+            S["l4_since"] += max(0.0, t - S["snooze_start"])
     S["snooze_until"], S["snooze_kind"], S["snooze_start"] = 0.0, "", 0.0
     save_state()
 
@@ -584,8 +602,25 @@ def tick():
         if lvl > S["level_sent"]:                    # first time this level is reached
             S["level_sent"] = lvl
             S["last_repeat"] = t
+            if lvl == 4:                             # the open-ended level: start the back-off clock
+                S["l4_since"], S["l4_repeat"], S["l4_alarm_repeat"], S["quiet_phase"] = t, cfg["repeat_s"], 0, False
             bump(lambda d: d["reminders"].__setitem__(lvl - 1, d["reminders"][lvl - 1] + 1))
             send(f"level{lvl}", min=int(mins))
+        elif lvl == 4:
+            limit = SET["loud_limit_min"] * 60
+            if S["quiet_phase"]:
+                gap = SET["notif"]["giveup"]["repeat_s"]
+                if gap and t - S["last_repeat"] >= gap:
+                    S["last_repeat"] = t
+                    send("giveup", min=int(mins))
+            elif limit and S["l4_since"] and t - S["l4_since"] >= limit:
+                S["quiet_phase"], S["last_repeat"] = True, t       # enough noise: only quiet notifications from now
+                log("level 4 loud phase over, sounds stop until you move")
+                send("giveup", min=int(mins))
+            elif S["l4_repeat"] and t - S["last_repeat"] >= S["l4_repeat"]:
+                S["last_repeat"] = t
+                send("level4", min=int(mins))
+                S["l4_repeat"] = min(S["l4_repeat"] * 2, max(SET["backoff_max_s"], cfg["repeat_s"]))
         elif cfg["repeat_s"] and t - S["last_repeat"] >= cfg["repeat_s"]:
             S["last_repeat"] = t
             send(f"level{lvl}", min=int(mins))

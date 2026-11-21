@@ -67,6 +67,16 @@ Token in `X-Token` or `?t=`. `/steps?steps=N`, `POST /snooze?min=5` (only length
 
 The loop writes what it does to `~/steps-loop.log` on the phone (kept under about 200 KB): each report with the Pi's reply, and for an alarm the volume it set, the phrase and the exit code of the text-to-speech command (124 = it hung and was stopped after 25 s). Every Termux command has a timeout, so one stuck command cannot freeze the loop. Look with `tail -20 ~/steps-loop.log`; run it in the foreground with `bash -x ~/steps-loop.sh` to see every command. The Pi side shows when the phone last reported on `steps.lan` (Phone data).
 
+## Long periods (phone left at home)
+
+If nobody moves for hours, level 4 would repeat forever (with the first settings: 180 ntfy sounds and about 54 timers per hour, about 1,400 notifications and 420 timers over a 9-hour day). Three rules prevent it (settings on the page):
+
+- **A new Clock timer never starts sooner than the previous one needs to finish ringing** (*A Clock timer rings for about*, default 180 s): a timer keeps counting past zero and ringing until it stops by itself, and each request makes a new timer.
+- **Level 4 backs off**: each repeat of the notification and of the timer waits twice as long as the last, up to *Repeat waits grow up to* (default 900 s).
+- **Level 4 stays loud for 30 minutes** (*Level 4 stays loud for*, 0 = no limit). After that the phone alarms and the loud notifications stop, and only the quiet *Still sitting* notification (priority 2, every 15 min, editable under Notifications) repeats until you move. Moving enough and then sitting again re-arms everything.
+
+Simulated with a fake clock and the owner's settings, a 9-hour day away gives 15 loud notifications (levels 1-4), 29 quiet ones and 6 timers (3 at level 3, 3 at level 4), instead of about 1,390 notifications and 420 timers. The loud phase restarts if the `steps` container is restarted.
+
 ## Lock screen
 
 Whether a notification shows on the lock screen is decided by Android, per ntfy priority (each priority is a separate notification category). Priorities 1 and 2 are *silent* and are hidden on the lock screen when Android's *Hide silent notifications* is on; when the phone's sound mode is vibrate or mute, ordinary sound notifications count as silent too. So the defaults avoid priorities 1 and 2 for reminders: level 1 is priority 3, level 2 is 4, levels 3 and 4 are 5 (the confirmations are still 1 and 2). Check Settings → Notifications → Lock screen notifications (show content, *Hide silent notifications* off) and Apps → ntfy → Notifications → each category (lock screen: show, pop-up on). The Clock timer's own ring screen also appears over the lock screen.

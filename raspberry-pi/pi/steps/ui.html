@@ -200,6 +200,12 @@
       <label class="check" style="margin:8px 0"><input type="checkbox" id="s_phone_alarm"> Phone alarms on (master switch; each level has its own alarm below)</label>
       <p class="hint">A level's phone alarm is a 1-second timer in the phone's Clock app (or a spoken phrase) that rings on the alarm volume. Give a lower volume and a longer interval to the earlier levels so the last level is clearly the most intense. The timer needs "Display over other apps" for Termux in Android settings; labels can have emojis and <code>{min}</code> (minutes sitting) and <code>{time}</code>. <b>Test</b> on a level also triggers its alarm, at the phone's next report.</p>
       <div class="orow"><label class="f">Clock app for the timers (package name, empty = the phone's default)<input type="text" id="s_alarm_package" maxlength="80" placeholder="com.google.android.deskclock" style="width:22em;max-width:100%"></label></div>
+      <p class="hint" style="margin-top:14px"><b>Long periods (for example you left the phone at home):</b> a Clock timer keeps ringing until it stops by itself, so a new one is never started sooner than the ring time below. Level 4 repeats back off (each wait doubles, up to the maximum), and after the loud phase all sound stops and only the quiet "Still sitting" notification repeats, until you move.</p>
+      <div class="orow">
+        <label class="f">A Clock timer rings for about (s)<input type="number" id="s_alarm_ring_s" min="10" max="1800"></label>
+        <label class="f">Level 4 stays loud for (min, 0 = no limit)<input type="number" id="s_loud_limit_min" min="0" max="1440"></label>
+        <label class="f">Repeat waits grow up to (s)<input type="number" id="s_backoff_max_s" min="20" max="3600"></label>
+      </div>
       <p class="hint">The timer volume is up to the Clock app: the Pi sets the phone's alarm volume, but some Clock apps (Samsung's, for example) play timers at a volume of their own, set inside the Clock app. Google's Clock (<code>com.google.android.deskclock</code>) follows the phone's alarm volume. Android has no global choice of timer app, so name it here.</p>
       <div id="notifs"></div>
       <div class="row" style="margin-top:16px">
@@ -250,7 +256,7 @@ const MODES = { watching: 'watching', snoozed: 'snoozed', quiet: 'quiet hours', 
 
 const NOTIF_META = [
   ['level1', 'Level 1 · light', true], ['level2', 'Level 2 · mid', true], ['level3', 'Level 3 · high', true], ['level4', 'Level 4 · constant', true],
-  ['moved', 'Moved enough (timer reset)', false], ['snoozed', 'Snoozed (confirmation)', false],
+  ['giveup', 'Quiet reminder after the loud phase', 'repeat'], ['moved', 'Moved enough (timer reset)', false], ['snoozed', 'Snoozed (confirmation)', false],
   ['snooze_end', 'Snooze ended', false], ['silent', 'Phone silent', false]];
 const PRIOS = [[1, '1 · min (hidden)'], [2, '2 · low (silent)'], [3, '3 · default (sound)'], [4, '4 · high (+ vibration)'], [5, '5 · max (loudest)']];
 function field(label, input, cls) { const l = document.createElement('label'); l.className = 'f' + (cls ? ' ' + cls : ''); l.appendChild(document.createTextNode(label)); l.appendChild(input); return l; }
@@ -274,7 +280,7 @@ function buildForms() {
     PRIOS.forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o); });
     f.appendChild(field('Priority', sel));
     if (isLevel) f.appendChild(field('Repeat every (s, 0 = once)', inp('number', 'n_' + key + '_repeat', { min: 0, max: 3600 })));
-    if (isLevel) {
+    if (isLevel === true) {
       const am = document.createElement('select'); am.id = 'n_' + key + '_alarm_mode';
       [['off', 'Phone alarm: off'], ['timer', 'Phone alarm: Clock timer'], ['speech', 'Phone alarm: spoken']].forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; am.appendChild(o); });
       f.appendChild(field('Phone alarm', am));
@@ -291,15 +297,15 @@ function fillForm(s) {
   s.levels_min.forEach((v, i) => $('l' + i).value = v);
   $('s_move_steps').value = s.move_steps;
   $('s_move_window_min').value = Math.round(s.move_window_s / 60); $('s_stale_min').value = s.stale_min;
-  $('s_phone_alarm').checked = s.phone_alarm; $('s_alarm_package').value = s.alarm_package;
+  $('s_phone_alarm').checked = s.phone_alarm; $('s_alarm_package').value = s.alarm_package; $('s_alarm_ring_s').value = s.alarm_ring_s; $('s_loud_limit_min').value = s.loud_limit_min; $('s_backoff_max_s').value = s.backoff_max_s;
   for (let i = 0; i < 4; i++) { const o = s.snooze_opts[i]; $('o' + i + 'm').value = o ? o[0] : ''; $('o' + i + 'b').value = o ? o[1] : ''; }
   $('s_report_idle_s').value = s.report_idle_s; $('s_report_walk_s').value = s.report_walk_s; $('s_walk_spm').value = s.walk_spm;
   $('s_quiet_enabled').checked = s.quiet_enabled; $('s_quiet_start').value = s.quiet_start; $('s_quiet_end').value = s.quiet_end;
   NOTIF_META.forEach(([key, , isLevel]) => {
     const n = s.notif[key];
     $('n_' + key + '_title').value = n.title; $('n_' + key + '_msg').value = n.msg; $('n_' + key + '_prio').value = n.prio;
-    if (isLevel) {
-      $('n_' + key + '_repeat').value = n.repeat_s;
+    if (isLevel) $('n_' + key + '_repeat').value = n.repeat_s;
+    if (isLevel === true) {
       $('n_' + key + '_alarm_mode').value = n.alarm_mode; $('n_' + key + '_alarm_volume').value = n.alarm_volume;
       $('n_' + key + '_alarm_repeat').value = n.alarm_repeat_s; $('n_' + key + '_alarm_text').value = n.alarm_text;
     }
@@ -309,8 +315,9 @@ function readForm() {
   const notif = {};
   NOTIF_META.forEach(([key, , isLevel]) => {
     notif[key] = { title: $('n_' + key + '_title').value, msg: $('n_' + key + '_msg').value, prio: Number($('n_' + key + '_prio').value) };
-    if (isLevel) Object.assign(notif[key], {
-      repeat_s: Number($('n_' + key + '_repeat').value), alarm_mode: $('n_' + key + '_alarm_mode').value,
+    if (isLevel) notif[key].repeat_s = Number($('n_' + key + '_repeat').value);
+    if (isLevel === true) Object.assign(notif[key], {
+      alarm_mode: $('n_' + key + '_alarm_mode').value,
       alarm_volume: Number($('n_' + key + '_alarm_volume').value), alarm_repeat_s: Number($('n_' + key + '_alarm_repeat').value),
       alarm_text: $('n_' + key + '_alarm_text').value });
   });
@@ -321,7 +328,7 @@ function readForm() {
     levels_min: [0, 1, 2, 3].map(i => Number($('l' + i).value)),
     move_steps: Number($('s_move_steps').value),
     move_window_s: Number($('s_move_window_min').value) * 60, stale_min: Number($('s_stale_min').value),
-    phone_alarm: $('s_phone_alarm').checked, alarm_package: $('s_alarm_package').value, snooze_opts: opts,
+    phone_alarm: $('s_phone_alarm').checked, alarm_package: $('s_alarm_package').value, alarm_ring_s: Number($('s_alarm_ring_s').value), loud_limit_min: Number($('s_loud_limit_min').value), backoff_max_s: Number($('s_backoff_max_s').value), snooze_opts: opts,
     report_idle_s: Number($('s_report_idle_s').value), report_walk_s: Number($('s_report_walk_s').value), walk_spm: Number($('s_walk_spm').value),
     quiet_enabled: $('s_quiet_enabled').checked, quiet_start: $('s_quiet_start').value, quiet_end: $('s_quiet_end').value,
     notif
