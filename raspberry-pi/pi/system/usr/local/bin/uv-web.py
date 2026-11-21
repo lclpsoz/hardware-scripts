@@ -2,8 +2,8 @@
 """uv-web: tiny read-only page with the Raspberry Pi undervoltage history.
 
 Reads the kernel log of ALL boots (the journal is persistent; plain -k would
-show only the current boot) through journalctl on demand (cached for 20 s), so it
-uses no CPU while nobody has the page open. Standard library only.
+show only the current boot). The full history is read once; after that only the last
+few minutes are read, at most once a minute, and nothing while nobody asks. Standard library only.
 """
 import html
 import json
@@ -15,19 +15,37 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 PORT = 8099
 DAYS = 7
 SNAP_FILE = "/var/log/uv-events.log"
-CACHE_SECONDS = 20
+CACHE_SECONDS = 60
 LINE = re.compile(
     r"^(\S+)\s+\S+\s+kernel: hwmon hwmon\d+: (Undervoltage detected!|Voltage normalised)"
 )
 _cache = {"t": 0.0, "page": b"", "json": b""}
 
 
+_seen = {}          # journal line -> None (ordered): all undervoltage lines of the last DAYS days
+_last_read = [0.0]  # when the journal was last read
+
+
 def get_lines():
+    """First call: read DAYS days of the kernel log of all boots. Later calls: only the last few
+    minutes (journalctl seeks by time, so it is cheap) and merge, instead of re-scanning
+    the whole journal on every refresh."""
+    import time
+    first = not _seen
+    since = f"{DAYS} days ago" if first else "5 minutes ago"
     out = subprocess.run(
-        ["journalctl", "-k", "-b", "all", "--since", f"{DAYS} days ago", "-o", "short-iso", "--no-pager"],
-        capture_output=True, text=True, timeout=30,
+        ["journalctl", "-k", "-b", "all", "--since", since, "--grep", "hwmon hwmon[0-9]+: (Under|Voltage)",
+         "-o", "short-iso", "--no-pager"],
+        capture_output=True, text=True, timeout=60,
     )
-    return out.stdout.splitlines()
+    if out.returncode in (0, 1):  # 1 = no match
+        for ln in out.stdout.splitlines():
+            _seen.setdefault(ln, None)
+        _last_read[0] = time.time()
+    cutoff = (datetime.now().astimezone() - timedelta(days=DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
+    for ln in [l for l in _seen if l[:19] < cutoff]:   # drop what is older than DAYS
+        del _seen[ln]
+    return list(_seen)
 
 
 def parse(lines):
