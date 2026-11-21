@@ -47,6 +47,18 @@ if [ $UI = 1 ]; then
   done
 fi
 
+hr "Names (.lan) through the proxy"
+for h in home.lan pihole.lan netalertx.lan beszel.lan power.lan net.lan; do
+  printf "  %-14s %s\n" "$h" "$(curl -s -o /dev/null -w '%{http_code} %{time_total}s' --max-time 20 -H "Host: $h" http://127.0.0.1/)"
+done
+s=$(curl -s --max-time 10 -H 'Host: net.lan' http://127.0.0.1/api/summary)
+[ -n "$s" ] && echo "$s" | python3 -c 'import json,sys; d=json.load(sys.stdin); sp=d.get("speed_last") or {}; print("  netq:", d["status_text"], "| cloudflare", d["latency_15m"].get("cloudflare"), "ms | last speed test", sp.get("down_mbps"), "/", sp.get("up_mbps"), "Mbps")'
+
+hr "NetAlertX lang.php override"
+img=$(docker inspect -f '{{.Image}}' netalertx 2>/dev/null | cut -c8-19)
+if [ "$img" = "ebce55cdbccc" ]; then echo "  image ebce55cdbccc (v26.10.28): the patch was made for this image"
+else echo "  image changed to $img: check upstream lang.php against raspberry-pi/pi/netalertx/lang.php.v26.10.28.orig before keeping the override"; fi
+
 hr "Pi-hole"
 docker exec pihole pihole version 2>/dev/null | tr '\n' ';'; echo
 docker exec pihole pihole-FTL sqlite3 -readonly /etc/pihole/pihole-FTL.db \
