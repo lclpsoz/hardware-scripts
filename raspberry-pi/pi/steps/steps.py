@@ -100,7 +100,7 @@ DEFAULTS = {
     # snooze buttons: [minutes, offered only while sitting under this many minutes (0 = always)]
     "snooze_opts": [[30, 90], [5, 110], [1, 0]],
     "phone_alarm": True,                # master switch for the phone alarms of the levels
-    "alarm_ring_s": 600,                # how long a Clock timer rings before it stops by itself (Clock app: 10 min): no new one starts sooner
+    "alarm_ring_s": 600,                # how long a Clock timer rings by itself (Clock app: 10 min); only used when no Clock app is named
     "loud_limit_min": 30,               # level 4 stays loud this long (0 = no limit), then only the quiet notification
     "backoff_max_s": 900,               # level 4 phone alarms double their wait each time, up to this many seconds
     "notif_backoff_max_s": 120,         # level 4 notifications double their wait each time, up to this many seconds
@@ -460,10 +460,13 @@ def alarm_due(now):
     if alarm_active(now):
         lvl = S["level_sent"]
         # never sooner than the timer needs to finish ringing (a Clock timer keeps going until it stops by itself)
-        floor = SET["alarm_ring_s"] + 10
+        # With a Clock app named the phone dismisses the old timers before each new one, so the alarm interval alone
+        # decides (you may well have dismissed it yourself). Without one old timers cannot be cleared and keep ringing
+        # for the Clock app's own time, so wait that long.
+        floor = 0 if SET["alarm_package"] else SET["alarm_ring_s"] + 10
         base = max(SET["notif"][f"level{lvl}"]["alarm_repeat_s"], floor)
         gap = max(S["l4_alarm_repeat"], base) if lvl == 4 else base
-        if S["last_alarm"] and now - S["last_alarm"] < floor:
+        if floor and S["last_alarm"] and now - S["last_alarm"] < floor:
             return 0                                  # the previous timer may still be ringing, whatever the level
         if lvl != S["last_alarm_level"] or now - S["last_alarm"] >= gap:
             S["last_alarm"], S["last_alarm_level"] = now, lvl
@@ -633,6 +636,7 @@ def tick():
                     send("giveup", min=int(mins))
             elif limit and S["l4_since"] and t - S["l4_since"] >= limit:
                 S["quiet_phase"], S["last_repeat"] = True, t       # enough noise: only quiet notifications from now
+                want_dismiss()                                       # and the last timer stops ringing
                 log("level 4 loud phase over, sounds stop until you move")
                 send("giveup", min=int(mins))
             elif S["l4_repeat"] and t - S["last_repeat"] >= S["l4_repeat"]:

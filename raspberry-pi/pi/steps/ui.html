@@ -202,7 +202,7 @@
       <div class="orow"><label class="f">Clock app for the timers (package name, empty = the phone's default)<input type="text" id="s_alarm_package" maxlength="80" placeholder="com.google.android.deskclock" style="width:22em;max-width:100%"></label></div>
       <p class="hint" style="margin-top:14px"><b>Long periods (for example you left the phone at home):</b> a Clock timer keeps ringing until it stops by itself, so a new one is never started sooner than the ring time below. Level 4 repeats back off (each wait doubles, up to the maximum), and after the loud phase all sound stops and only the quiet "Still sitting" notification repeats, until you move.</p>
       <div class="orow">
-        <label class="f">A Clock timer rings for about (s)<input type="number" id="s_alarm_ring_s" min="10" max="1800"></label>
+        <label class="f">Timer ring time, only if no Clock app is named (s)<input type="number" id="s_alarm_ring_s" min="10" max="1800"></label>
         <label class="f">Level 4 stays loud for (min, 0 = no limit)<input type="number" id="s_loud_limit_min" min="0" max="1440"></label>
         <label class="f">Alarm waits grow up to (s)<input type="number" id="s_backoff_max_s" min="20" max="3600"></label>
         <label class="f">Notification waits grow up to (s)<input type="number" id="s_notif_backoff_max_s" min="20" max="3600"></label>
