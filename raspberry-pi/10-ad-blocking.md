@@ -2,6 +2,9 @@
 
 Checked 2026-11-20, 21:15.
 
+**Update, 2026-11-20 22:08: the proposed change below is applied.** HaGeZi Pro is on the `Default` group only; `in.logs.betterstack.com` and `(\.|^)on\.aws$` are allowed; gravity grew from 76,105 to 320,161 domains. `i.clarity.ms` now answers `0.0.0.0`, and the BetterStack name still resolves. The gravity rebuild ran at low priority while the power supply is still marginal. Watch for a day and allow any name that breaks a site (Query Log → Allow). The owner is also trying other lists, so more changes may follow.
+
+
 **Bottom line:** blocking works again for every device. The StevenBlack list is now assigned to `Default` as well as the TV group, and list-blocked queries went from 0 an hour to 562 in the 20:00 hour.
 
 You still see ads for two reasons:
