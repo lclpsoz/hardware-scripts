@@ -30,7 +30,7 @@ Endpoints (token in header X-Token or ?t=):
   GET  /phone.sh              the Termux loop script (no token)
   POST /api/settings          JSON body with any settings, validated
   POST /api/test              {"type": "level2"|"moved"|...} send that notification
-  GET  /api/pings?hours=3     ping results of the last 1-12 h
+  GET  /api/pings?hours=3     ping results of the last 1-168 h (kept in /data/pings.jsonl, so a restart keeps them)
   POST /api/debug/steps       {"n": N} fake report with the counter raised by N (hollow dot)
   POST /api/debug/sitting     {"min": M} pretend you have been sitting M minutes
   POST /api/debug/dismiss     the phone dismisses its Clock timers at the next report
@@ -64,7 +64,7 @@ PHONE_FILE = E("PHONE_FILE", "/app/phone.sh")
 STREET_FILE = E("STREET_FILE", "/app/street.sh")
 KEEP_DAYS = 365
 KEEP_REPORTS_H = 24
-KEEP_PINGS_H = 12
+KEEP_PINGS_H = 168          # a week of pings: about 1,440 lines (60 KB) a day
 ARP_FILE = E("ARP_FILE", "/proc/net/arp")
 
 
@@ -141,7 +141,8 @@ samples = deque()
 stats = {}            # "YYYY-MM-DD" -> day record
 stats_dirty = False
 reports = deque()     # [unix time, counter value(, 1 if added by hand)] of every phone report, last 24 h
-pings = deque()       # [unix time, 1 if the phone answered else 0, round-trip ms or None, address tried] every presence ping, last 12 h
+pings = deque()       # [unix time, 1 if the phone answered else 0, round-trip ms or None, address tried] every presence ping, last 7 days
+pings_appended = 0    # lines appended to pings.jsonl since it was last rewritten
 appended = 0          # lines appended to reports.jsonl since it was last rewritten compactly
 
 
@@ -193,6 +194,31 @@ def append_report(rec):
         appended += 1
     except OSError as e:
         log("report not saved:", e)
+
+
+def append_ping(rec):
+    """One line per ping, no fsync (a power cut can lose the last few)."""
+    global pings_appended
+    try:
+        with open(os.path.join(DATA, "pings.jsonl"), "a") as f:
+            f.write(json.dumps(rec) + "\n")
+        pings_appended += 1
+    except OSError as e:
+        log("ping not saved:", e)
+
+
+def compact_pings():
+    """Rewrite pings.jsonl with only the pings still kept."""
+    global pings_appended
+    path = os.path.join(DATA, "pings.jsonl")
+    try:
+        with open(path + ".tmp", "w") as f:
+            for x in pings:
+                f.write(json.dumps(x) + "\n")
+        os.replace(path + ".tmp", path)
+        pings_appended = 0
+    except OSError as e:
+        log("pings not compacted:", e)
 
 
 def compact_reports():
@@ -268,6 +294,20 @@ def load():
     real = [x for x in reports if len(x) == 2]       # reports added by hand do not count as the phone
     if real:                                          # a restart must not make the phone look silent
         S["last_sample"], S["steps"] = float(real[-1][0]), real[-1][1]
+    try:
+        with open(os.path.join(DATA, "pings.jsonl")) as f:
+            for line in f:
+                try:
+                    x = json.loads(line)
+                    if isinstance(x, list) and len(x) == 4 and x[0] >= time.time() - KEEP_PINGS_H * 3600:
+                        pings.append(x)
+                except ValueError:
+                    pass                  # a half-written last line after a power cut
+    except OSError:
+        pass
+    if pings:
+        compact_pings()
+        S["last_ping"] = pings[-1]
     sj = read_json("street.json")
     if isinstance(sj, dict) and isinstance(sj.get("last_n"), int):
         S["street"].update({k: sj[k] for k in ("last_t", "last_n", "uploaded_at") if k in sj})
@@ -678,9 +718,12 @@ def presence_loop():
                 with lock:
                     rec = [int(t), 1 if rtt is not None else 0, round(rtt, 1) if rtt is not None else None, ip or ""]
                     pings.append(rec)
+                    append_ping(rec)
                     S["last_ping"] = rec
                     while pings and pings[0][0] < t - KEEP_PINGS_H * 3600:
                         pings.popleft()
+                    if pings_appended >= 1440:
+                        compact_pings()
                     if rtt is not None:
                         mark_home(t, ip)
         except Exception as e:
@@ -1022,6 +1065,9 @@ class H(BaseHTTPRequestHandler):
                 t = time.time()
                 with lock:
                     rows = [x for x in pings if x[0] >= t - h * 3600]
+                if len(rows) > 900:                    # thin the answered ones, keep every miss
+                    k = len(rows) // 900 + 1
+                    rows = [x for i, x in enumerate(rows) if not x[1] or i % k == 0 or i == len(rows) - 1]
                 return self.reply(200, {"now": int(t), "hours": h, "pings": rows})
             if u.path == "/api/settings" and self.command == "POST":
                 ok, err = validate(self.body_json())

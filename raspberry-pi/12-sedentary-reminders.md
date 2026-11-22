@@ -73,6 +73,7 @@ The phone's Wi-Fi stays on at home, and the Pi pings it every 60 s (`presence_ev
 
 - **Away** = no ping answer for `presence_away_min` (default 8) minutes. The sitting timer is then **paused from the last time the phone was seen**, like a snooze: reminders and phone alarms stop and the Clock timers are dismissed at the next report. When the phone is back the timer **carries on from the same value** (not reset). A snooze active at that moment ends when you leave.
 - The state is kept in `state.json`, so a restart keeps you away until the next ping answers.
+- Every ping is kept for a week in `~/steps/data/pings.jsonl` (about 60 KB a day, no fsync, thinned on the page for long ranges), so a restart does not empty the chart.
 - The page shows a banner and a grayed timer while away, and a *Phone at home* card with the last ping, the answered/missed pings of the last 1 to 12 h and the last 6 results. `GET /api/pings?hours=3` gives the data. Settings are on the page (name, MAC, address to try first, ping interval, minutes before away).
 - Needs the phone's Wi-Fi on at home and `ping` in the container (the Alpine image has it; it works as uid 1000 because of the host's `ping_group_range`). Phones in power-save answer slowly (about 300 ms) and may miss a ping, which is why one miss is not enough to be away.
 

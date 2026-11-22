@@ -10,8 +10,12 @@ Q=~/.steps-queue
 LOG=~/street-steps.log
 log() { echo "$(date +%m-%d\ %H:%M:%S) $*" >> "$LOG"; }
 
-out=$(timeout 20 termux-sensor -s "Step Counter" -n 1 2>/dev/null)
-n=$(printf '%s' "$out" | grep -A2 '"values"' | grep -oE '[0-9]+(\.[0-9]+)?' | head -1 | cut -d. -f1)
+# Output goes to a file, not a $(...) pipe: if termux-sensor hangs, its children could keep a pipe open and
+# block the shell forever; -k makes sure it is killed.
+TMP=$(mktemp)
+timeout -k 2 20 termux-sensor -s "Step Counter" -n 1 > "$TMP" 2>/dev/null < /dev/null
+n=$(grep -A2 '"values"' "$TMP" | grep -oE '[0-9]+(\.[0-9]+)?' | head -1 | cut -d. -f1)
+rm -f "$TMP"
 [ -n "$n" ] && echo "$(date +%s) $n" >> "$Q" || log "no step counter reading"
 [ -s "$Q" ] || exit 0
 tail -n 700 "$Q" > "$Q.tmp" && mv "$Q.tmp" "$Q"        # keep about a week at one sample per 15 min

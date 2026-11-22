@@ -9,7 +9,7 @@ set -e
 PI=$(grep '^PI=' ~/.steps-env | cut -d= -f2-)
 curl -fsS "$PI/street.sh" -o ~/street-steps.sh && chmod +x ~/street-steps.sh
 termux-job-scheduler --cancel-all
-termux-job-scheduler --job-id 1 --script ~/street-steps.sh --period-ms 900000 --persisted true
+termux-job-scheduler --job-id 1 --script ~/street-steps.sh --period-ms 900000 --network none --persisted true
 termux-job-scheduler --job-id 2 --script ~/street-steps.sh --period-ms 900000 --network unmetered --persisted true
 termux-job-scheduler -p
 echo "Done. Run ~/street-steps.sh once by hand and check: tail ~/street-steps.log"

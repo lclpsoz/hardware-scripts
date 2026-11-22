@@ -613,7 +613,7 @@ function drawReports(j) {
   });
 }
 async function loadSamples() {
-  try { GAP_MIN = Math.max(6, 3 * (settings.report_idle_s || 60) / 60); const j = await api('/api/samples?hours=' + range); drawRate(j); drawReports(j); drawPings(await api('/api/pings?hours=' + Math.min(range, 12))); } catch (e) { if (e.message !== 'token') msg('Cannot load reports: ' + e.message, 'err'); }
+  try { GAP_MIN = Math.max(6, 3 * (settings.report_idle_s || 60) / 60); const j = await api('/api/samples?hours=' + range); drawRate(j); drawReports(j); drawPings(await api('/api/pings?hours=' + range)); } catch (e) { if (e.message !== 'token') msg('Cannot load reports: ' + e.message, 'err'); }
 }
 document.querySelectorAll('#rng button').forEach(b => b.onclick = () => {
   range = Number(b.dataset.h);
