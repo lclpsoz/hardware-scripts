@@ -12,6 +12,7 @@ Set up 2026-11-20. Every service on the Pi now has a short name. Open **http://h
 | [net.lan](http://net.lan) | Internet quality ([08-internet-quality.md](08-internet-quality.md)) | 8098, localhost only |
 | [ntfy.lan](http://ntfy.lan) | Push notifications server ([11-notifications.md](11-notifications.md)) | 2586, localhost only |
 | [steps.lan](http://steps.lan) | Sitting reminders: timer, snooze, daily stats and settings ([12-sedentary-reminders.md](12-sedentary-reminders.md)) | 8097, LAN |
+| [focus.lan](http://focus.lan) | Open a blocked site on the work laptop for a few minutes ([15-focus-blocking.md](15-focus-blocking.md)) | 8095, LAN |
 | `router.lan` | The ISP router (192.168.0.1) | 80 on the router |
 
 Old addresses keep working: `http://192.168.0.250/admin` and `http://pi.hole/admin` still reach Pi-hole.

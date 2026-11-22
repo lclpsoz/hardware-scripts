@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Focus</title>
+<style>
+:root{color-scheme:light dark;--bg:#fff;--fg:#1a1a1a;--mut:#666;--card:#f3f3f3;--ok:#1a7f37;--open:#b45309;--btn:#e4e4e4}
+@media(prefers-color-scheme:dark){:root{--bg:#111;--fg:#eee;--mut:#999;--card:#1c1c1c;--ok:#4ade80;--open:#fbbf24;--btn:#2a2a2a}}
+body{background:var(--bg);color:var(--fg);font:16px system-ui,sans-serif;margin:0;padding:16px;max-width:560px}
+h1{font-size:1.2rem;margin:0 0 4px}p{color:var(--mut);margin:0 0 16px}
+.s{background:var(--card);border-radius:10px;padding:12px 14px;margin-bottom:12px}
+.h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+.n{font-weight:600;text-transform:capitalize}.st{font-size:.9rem}.b{color:var(--ok)}.o{color:var(--open)}
+button{font:inherit;color:var(--fg);background:var(--btn);border:0;border-radius:8px;padding:10px 14px;margin:0 6px 6px 0;min-width:64px}
+button.c{background:transparent;border:1px solid var(--mut)}
+#e{color:#c00;min-height:1.2em}
+</style></head><body>
+<h1>Focus: work laptop</h1><p>Sites are blocked for the work laptop. Open one for a while; it closes by itself.</p>
+<div id="l"></div><button class="c" onclick="act('/api/close',{site:'all'})">Block everything now</button><div id="e"></div>
+<script>
+const M=[5,10,30];let st=null;
+function fmt(s){const m=Math.floor(s/60),r=s%60;return m+':'+String(r).padStart(2,'0')}
+function draw(){if(!st)return;document.getElementById('l').innerHTML=st.sites.map(x=>
+ `<div class="s"><div class="h"><span class="n">${x.site}</span><span class="st ${x.open?'o':'b'}">${x.open?'open, '+fmt(x.seconds_left)+' left':'blocked'}</span></div>`+
+ M.map(m=>`<button onclick="act('/api/open',{site:'${x.site}',minutes:${m}})">${m} min</button>`).join('')+
+ (x.open?`<button class="c" onclick="act('/api/close',{site:'${x.site}'})">Block now</button>`:'')+`</div>`).join('')}
+async function act(p,b){document.getElementById('e').textContent='';
+ try{const r=await fetch(p,{method:'POST',body:JSON.stringify(b)});const j=await r.json();if(!r.ok)throw new Error(j.error);st=j;draw()}
+ catch(e){document.getElementById('e').textContent=e.message}}
+async function poll(){try{st=await (await fetch('/api/status')).json();draw()}catch(e){}}
+poll();setInterval(poll,5000);setInterval(()=>{if(st){st.sites.forEach(x=>{if(x.seconds_left>0)x.seconds_left--});draw()}},1000);
+</script></body></html>
