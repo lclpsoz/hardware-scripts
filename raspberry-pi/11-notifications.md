@@ -76,3 +76,9 @@ Other relevant things I considered and left out on purpose: per-minute packet lo
 - **No messages at all:** open `http://ntfy.lan/v1/health` in the phone's browser. If that fails, the phone is not using Pi-hole for DNS or is off the home network.
 - **Messages delayed:** battery optimization on the phone (step 4 above).
 - **`Pi alerts are not reporting` from the laptop:** `docker ps` and `docker logs alerts` on the Pi.
+
+## Added 2026-11-22
+
+- **Laptop Wi-Fi is the weak link** (after 15 minutes): the laptop's pings to the router are slow or lossy while the Pi sees the line healthy ([13](13-laptop-netprobe.md)).
+- **Weekly internet summary**, Sunday after 20:00, low priority.
+- **Laptop speed test is low**, from the laptop itself, only for tests not disturbed by other traffic, at most every 3 hours.

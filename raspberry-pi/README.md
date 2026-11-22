@@ -20,6 +20,7 @@ This folder holds:
 | Notifications | **New:** ntfy at `ntfy.lan`, alerts from the Pi, NetAlertX and a daily laptop backup ([11](11-notifications.md)). Phone setup still needed. |
 | Names | **New:** `home.lan`, `pihole.lan`, `netalertx.lan`, `beszel.lan`, `power.lan`, `net.lan` ([07](07-services.md)) |
 | Internet quality | **New:** `net.lan`, measuring every minute; first speed test 59.7 / 42.0 Mbps, capped by the Pi ([08](08-internet-quality.md)) |
+| Laptop probe | **New (22 Nov):** the laptop reports every minute and runs full-speed tests for the Pi ([13](13-laptop-netprobe.md)) |
 | Pi-hole | Updated to core 6.6 / FTL 6.9. `DBinterval` 300. Upstream is now the encrypted forwarder ([09](09-encrypted-dns.md)). Rate limit and concurrency limit left as they are by choice, to be re-evaluated after some days with the new list ([02](02-pihole.md#8-can-the-limits-go-up-follow-up-2026-11-20-evening)). |
 | Reboot | Done 21:56: kernel 6.18.60 running, all containers healthy. |
 | HDMI | Off (done by you with sudo); 0 phantom-connect messages after the reboot ([05](05-system-health.md#why-hdmi-says-connected-with-nothing-plugged-in)) |

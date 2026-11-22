@@ -37,6 +37,6 @@ What is still open on the Pi and the laptop-side services, in priority order. Up
 
 ## 5. Future services (not started)
 
-### Speed-test client: written, waiting for deploy
+### Speed-test client: deployed 2026-11-22
 
-Designed and built 2026-11-21: [13-laptop-netprobe.md](13-laptop-netprobe.md). Code is in `laptop/services/netprobe/` and `pi/netq/netq.py`; tested on the laptop and in demo mode. **Not yet on the Pi.** Deploy steps: create `~/netq/config.env` with a token, set `NETQ_TOKEN` in the laptop config, copy `netq.py` and the compose file to `~/netq`, `docker compose up -d`, then `bash raspberry-pi/laptop/install.sh`. The improvement ideas are listed at the end of the doc.
+Running: [13-laptop-netprobe.md](13-laptop-netprobe.md). Watch for a week: the data it moves (up to about 28 GB a day at the 30-minute default), whether the TV or calls notice the 15 s bursts, and how often tests are marked as disturbed by qBittorrent. Enabling qBittorrent's Web UI on localhost would give exact torrent rates. Proposed next steps are at the end of the doc.

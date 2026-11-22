@@ -27,7 +27,7 @@ The ranges are 6 h, 24 h, 7 days and 30 days. Data is kept for 60 days.
   - It shows big drops: if a test falls well below the usual number, the line is degraded.
   - Ping during the download tests bufferbloat. The first test showed 31.4 ms idle and 31.8 ms loaded, which is no bufferbloat.
   - The "undervoltage during test" note shows whether the test itself caused a voltage drop.
-- **For the real fibre speed,** test from a wired laptop or desktop: speed.cloudflare.com or fast.com.
+- **For the real fibre speed,** the laptop now runs the test when the Pi asks: see [13-laptop-netprobe.md](13-laptop-netprobe.md) (first result: 530 / 170 Mbps).
 - **Data cost:** about 12 MB per test, 4 times a day, roughly 1.5 GB a month. Set `NETQ_SPEED_EVERY_H: "0"` to stop scheduled tests and keep the button.
 
 ## First readings (2026-11-20, 21:10)

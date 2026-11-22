@@ -229,6 +229,33 @@ def check_netq():
             "stop resolving. Check: docker logs dnsproxy.", 4, after=180, tags=["lock"])
 
 
+def check_laptop_wifi():
+    """The laptop's pings to the router are slow or lossy while the Pi sees a healthy line: the problem is
+    the laptop's Wi-Fi, not the ISP. netq decides (see laptop_wifi_diag); we only add the 15 min wait."""
+    try:
+        w = (get_json(NETQ_URL + "/api/summary").get("laptop_wifi") or {})
+    except (OSError, ValueError):
+        return
+    observe("laptop:wifi", bool(w.get("bad")), "The laptop's Wi-Fi is the weak link, not the internet",
+            "; ".join(w.get("reasons") or []) + ". The Pi sees the line as healthy. Move closer to the router, "
+            "check the band, or use the cable. Details: http://net.lan", 3, after=900, tags=["signal_strength"])
+
+
+def check_weekly():
+    """Sunday evening: one low-priority summary of the week's laptop speed tests (by hour of day)."""
+    t = time.localtime()
+    day = time.strftime("%Y-%m-%d", t)
+    if t.tm_wday != 6 or t.tm_hour < 20 or STATE.get("weekly_last") == day:
+        return
+    try:
+        w = get_json(NETQ_URL + "/api/weekly")
+    except (OSError, ValueError):
+        return
+    notify(w.get("title", "Weekly internet summary"), w.get("text", ""), 2, ["bar_chart"])
+    STATE["weekly_last"] = day
+    dirty()
+
+
 def check_system():
     try:
         with open("/proc/meminfo") as f:
@@ -410,7 +437,7 @@ def check_pihole_api():
         pass
 
 
-CHECKS = [check_services, check_netq, check_system, check_flight_recorder, check_backup, check_pihole_api]
+CHECKS = [check_services, check_netq, check_laptop_wifi, check_weekly, check_system, check_flight_recorder, check_backup, check_pihole_api]
 
 
 def heartbeat():

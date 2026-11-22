@@ -69,7 +69,9 @@ SPEED_UP = int(env("NETQ_SPEED_UP_BYTES", "2000000"))
 SPEED_MIN_GAP = int(env("NETQ_SPEED_MIN_GAP", "600"))
 # The laptop probe. The token (secret, from config.env) must match NETQ_TOKEN on the laptop; empty = disabled.
 LAPTOP_TOKEN = env("NETQ_LAPTOP_TOKEN", "")
-LAPTOP_EVERY_MIN = float(env("NETQ_LAPTOP_SPEED_EVERY_MIN", "60"))    # 0 turns the scheduled laptop test off
+LAPTOP_EVERY_MIN = float(env("NETQ_LAPTOP_SPEED_EVERY_MIN", "30"))    # default; changeable on the page. 0 = off
+LAPTOP_LIGHT_EVERY_MIN = float(env("NETQ_LAPTOP_LIGHT_EVERY_MIN", "10"))   # 3 s ping-only probe between full tests; 0 = off
+SETTINGS_PATH = env("NETQ_SETTINGS", "/data/laptop.json")
 LAPTOP_RUN = {"down_secs": float(env("NETQ_LAPTOP_DOWN_SECS", "8")), "up_secs": float(env("NETQ_LAPTOP_UP_SECS", "6")),
               "streams": int(env("NETQ_LAPTOP_STREAMS", "4")), "max_mb": int(env("NETQ_LAPTOP_MAX_MB", "300"))}
 LAPTOP_SEEN_S = 150          # no heartbeat for this long = the laptop is gone (heartbeats come every ~60 s)
@@ -86,7 +88,8 @@ RANGES = {"6h": (6 * 3600, 60, 900), "24h": (86400, 300, 3600),
           "7d": (7 * 86400, 1800, 6 * 3600), "30d": (30 * 86400, 7200, 86400)}
 STOP = threading.Event()
 STATE = {"speed_running": False, "speed_last_start": 0.0, "started": time.time(),
-         "laptop_req": None, "laptop_last_start": 0.0, "laptop_active_until": 0.0, "laptop_last_hb": None}
+         "laptop_req": None, "laptop_last_start": 0.0, "laptop_active_until": 0.0, "laptop_last_hb": None,
+         "laptop_every_min": LAPTOP_EVERY_MIN, "laptop_plan": None, "laptop_last_light": 0.0}
 LAPTOP_LOCK = threading.Lock()
 
 
@@ -366,8 +369,31 @@ def laptop_request(trigger):
                            "issued": None, "blocked": None}
 
 
+def load_settings():
+    try:
+        with open(SETTINGS_PATH) as f:
+            v = json.load(f).get("every_min")
+        if isinstance(v, (int, float)) and 0 <= v <= 1440:
+            STATE["laptop_every_min"] = float(v)
+    except (OSError, ValueError, AttributeError):
+        pass
+
+
+def save_settings():
+    try:
+        tmp = SETTINGS_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump({"every_min": STATE["laptop_every_min"]}, f)
+        os.replace(tmp, SETTINGS_PATH)
+    except OSError:
+        pass
+
+
 def laptop_tick(hb):
-    """Decide, at a heartbeat, whether to hand out the pending request. Caller holds LAPTOP_LOCK."""
+    """Decide, at a heartbeat, what to hand the laptop: a full test and/or a light probe.
+    Never two tests at once: a new request is only created when the previous one is finished, and the
+    spacing counts from the START of the previous test, so a slow test just makes the gap shorter.
+    Caller holds LAPTOP_LOCK. Returns (run, light)."""
     now = time.time()
     req = STATE["laptop_req"]
     if req and req["issued"] and now - req["issued"] > LAPTOP_RUN_TTL:
@@ -376,25 +402,44 @@ def laptop_tick(hb):
         STATE["laptop_req"] = req = None
     if req and not req["issued"] and now - req["created"] > LAPTOP_REQ_TTL:
         STATE["laptop_req"] = req = None
-    if req is None and LAPTOP_EVERY_MIN > 0 and now - STATE["laptop_last_start"] >= LAPTOP_EVERY_MIN * 60:
-        laptop_request("schedule")
-        req = STATE["laptop_req"]
-    if not req or req["issued"]:
-        return None
+    plan, every = STATE["laptop_plan"], STATE["laptop_every_min"]
+    if req is None:
+        gap = now - STATE["laptop_last_start"]
+        if plan:                                   # a series replaces the schedule until it is done
+            if gap >= plan["interval"] * 60:
+                laptop_request("series")
+                req = STATE["laptop_req"]
+        elif every > 0 and gap >= every * 60:
+            laptop_request("schedule")
+            req = STATE["laptop_req"]
     router = dict(PING_TARGETS).get("router")
-    if STATE["speed_running"]:
-        req["blocked"] = "the Pi's own test is running"
-    elif not hb.get("ready"):
-        req["blocked"] = hb.get("not_ready") or "not ready"
-    elif router and hb.get("gateway") != router:
-        req["blocked"] = "the laptop is not on the home network"
-    else:
-        req["blocked"], req["issued"] = None, now
-        STATE["laptop_last_start"] = now
-        STATE["laptop_active_until"] = now + 75      # the Pi's probes pause meanwhile: the test saturates the line
-        ping = {k: v for k, v in PING_TARGETS if k in ("router", "isp", "cloudflare")}
-        return dict(LAPTOP_RUN, id=req["id"], trigger=req["trigger"], ping=ping)
-    return None
+    on_home = not router or hb.get("gateway") == router
+    ping = {k: v for k, v in PING_TARGETS if k in ("router", "isp", "cloudflare")}
+    run = None
+    if req and not req["issued"]:
+        if STATE["speed_running"]:
+            req["blocked"] = "the Pi's own test is running"
+        elif not hb.get("ready"):
+            req["blocked"] = hb.get("not_ready") or "not ready"
+        elif not on_home:
+            req["blocked"] = "the laptop is not on the home network"
+        else:
+            req["blocked"], req["issued"] = None, now
+            STATE["laptop_last_start"] = now
+            STATE["laptop_active_until"] = now + 75      # the Pi's probes pause: the test saturates the line
+            if plan:
+                plan["remaining"] -= 1
+                if plan["remaining"] <= 0:
+                    STATE["laptop_plan"] = None
+            run = dict(LAPTOP_RUN, id=req["id"], trigger=req["trigger"], ping=ping)
+    light = None
+    busy = STATE["laptop_req"] is not None and STATE["laptop_req"]["issued"]
+    if (run is None and not busy and LAPTOP_LIGHT_EVERY_MIN > 0 and on_home and hb.get("gateway")
+            and (hb.get("ready") or hb.get("not_ready") == "on battery")
+            and now - STATE["laptop_last_light"] >= LAPTOP_LIGHT_EVERY_MIN * 60 - 20):
+        STATE["laptop_last_light"] = now
+        light = {"ping": ping, "secs": 3}
+    return run, light
 
 
 def laptop_poll(hb):
@@ -405,8 +450,21 @@ def laptop_poll(hb):
                       "ready": bool(hb.get("ready")), "not_ready": hb.get("not_ready")})
     with LAPTOP_LOCK:
         STATE["laptop_last_hb"] = now
-        run = laptop_tick(hb)
-    return {"ok": True, "now": int(now), "run": run}
+        run, light = laptop_tick(hb)
+    return {"ok": True, "now": int(now), "run": run, "light": light}
+
+
+def laptop_pings(ts, pings):
+    """Store the laptop's own ping results (name -> {ms, loss_pct, jitter_ms}) as 'lap_ping' samples."""
+    for name, r in (pings or {}).items():
+        if name in ("router", "isp", "cloudflare") and isinstance(r, dict) and r.get("sent"):
+            loss = (_num(r.get("loss_pct")) or 0.0) / 100
+            STORE.add(ts, "lap_ping", name, loss < 1, _num(r.get("ms")), loss, {"jitter": _num(r.get("jitter_ms"))})
+
+
+def laptop_light(body):
+    laptop_pings(time.time(), body.get("ping"))
+    return {"ok": True}
 
 
 def laptop_baseline():
@@ -427,6 +485,7 @@ def laptop_result(body):
         STATE["laptop_active_until"] = time.time() + 3
     baseline = laptop_baseline()                # before this result is added
     res.setdefault("trigger", req["trigger"])
+    laptop_pings(res.get("started") or time.time(), res.pop("idle", None))
     STORE.add(res.get("started") or time.time(), "speed", "laptop", res.get("down_mbps") is not None,
               _num(res.get("down_mbps")), None, res)
     return {"ok": True, "baseline_down_mbps": baseline}
@@ -509,6 +568,84 @@ def laptop_state():
             return None
         return {"trigger": req["trigger"], "running": bool(req["issued"]), "blocked": req["blocked"],
                 "age_s": int(time.time() - req["created"])}
+
+
+WIFI_WINDOW = 1800          # the last 30 minutes of the laptop's own pings
+WIFI_ROUTER_MS = 15.0       # the laptop-to-router leg is normally 1-5 ms on 5 GHz
+WIFI_LOSS_PCT = 5.0
+WIFI_WEAK_DBM = -75
+
+
+def laptop_wifi_diag():
+    """Is the laptop's Wi-Fi the weak link rather than the ISP? Compares what the laptop sees on its own
+    pings (router leg) and signal with what the Pi sees from its cable (ISP leg, Cloudflare). Returns
+    {"applicable", "bad", "reasons", ...}; the alerts service watches "bad" and waits 15 minutes."""
+    now = int(time.time())
+    last = STORE.rows("SELECT extra FROM laptop ORDER BY ts DESC LIMIT 1")
+    link = (json.loads(last[0][0] or "{}").get("link") or {}) if last else {}
+    out = {"applicable": False, "bad": False, "reasons": []}
+    if link.get("type") != "wifi" or not STATE["laptop_last_hb"] or now - STATE["laptop_last_hb"] > LAPTOP_SEEN_S:
+        return out
+    out["applicable"] = True
+    rows = STORE.rows("SELECT ms, loss FROM sample WHERE kind='lap_ping' AND target='router' AND ts>=?", (now - WIFI_WINDOW,))
+    if len(rows) < 2:
+        return out
+    ms = [r[0] for r in rows if r[0] is not None]
+    loss = 100 * sum(r[1] or 0 for r in rows) / len(rows)
+    out.update(router_ms=round(median(ms), 1) if ms else None, router_loss_pct=round(loss, 1), signal_dbm=link.get("signal_dbm"))
+    # The Pi's view of the line over the same window: if the ISP leg or Cloudflare are bad, it is not (only) Wi-Fi
+    pi = {}
+    for name in ("isp", "cloudflare"):
+        r = STORE.rows("SELECT avg(loss) FROM sample WHERE kind='ping' AND target=? AND ts>=?", (name, now - WIFI_WINDOW))
+        pi[name] = (r[0][0] or 0) * 100 if r and r[0][0] is not None else None
+    line_ok = all(v is None or v < 5 for v in pi.values())
+    out["line_ok"] = line_ok
+    reasons = []
+    if out["router_ms"] is not None and out["router_ms"] > WIFI_ROUTER_MS:
+        reasons.append(f"ping to the router from the laptop is {out['router_ms']} ms (normal under 5)")
+    if loss >= WIFI_LOSS_PCT:
+        reasons.append(f"{out['router_loss_pct']}% of pings to the router are lost")
+    if link.get("signal_dbm") is not None and link["signal_dbm"] < WIFI_WEAK_DBM:
+        reasons.append(f"weak signal ({link['signal_dbm']} dBm)")
+    # the latest clean full test: slow while the Pi sees a healthy line and the laptop's link is poor
+    t = STORE.rows("SELECT ms, extra FROM sample WHERE kind='speed' AND target='laptop' AND ok=1 AND ts>=? ORDER BY ts DESC LIMIT 1", (now - WIFI_WINDOW,))
+    base = laptop_baseline()
+    if t and base and t[0][0] is not None and t[0][0] < 0.5 * base and not json.loads(t[0][1] or "{}").get("contended") and reasons:
+        reasons.append(f"and the last test was {t[0][0]:g} Mbps against {base:g} usual")
+    out["reasons"] = reasons
+    out["bad"] = bool(reasons) and line_ok
+    return out
+
+
+def weekly_summary():
+    """Text for the Sunday notification: the laptop's clean speed tests of the last 7 days by hour of day."""
+    now = int(time.time())
+    rows = STORE.rows("SELECT ts, ms, extra FROM sample WHERE kind='speed' AND target='laptop' AND ok=1 AND ts>=?", (now - 7 * 86400,))
+    tests = [(ts, ms, json.loads(extra or "{}")) for ts, ms, extra in rows if ms is not None]
+    clean = [t for t in tests if not t[2].get("contended")]
+    lines, byhour = [], {}
+    for ts, ms, ex in clean:
+        byhour.setdefault(time.localtime(ts).tm_hour, []).append((ms, ex.get("up_mbps")))
+    if clean:
+        downs = [t[1] for t in clean]
+        ups = [t[2]["up_mbps"] for t in clean if t[2].get("up_mbps") is not None]
+        lines.append(f"{len(clean)} clean laptop tests ({len(tests) - len(clean)} disturbed by other traffic): median "
+                     f"{median(downs):g} down / {median(ups):g} up Mbps, range {min(downs):g}-{max(downs):g}.")
+        hours = {h: median(v[0] for v in vs) for h, vs in byhour.items() if len(vs) >= 2}
+        if len(hours) >= 3:
+            best, worst = max(hours, key=hours.get), min(hours, key=hours.get)
+            lines.append(f"Best hour {best:02d}h ({hours[best]:g} Mbps), slowest {worst:02d}h ({hours[worst]:g} Mbps).")
+    else:
+        lines.append("No clean laptop speed tests this week.")
+    lap = laptop_summary()
+    if lap and lap.get("uptime_7d_pct") is not None:
+        lines.append(f"Laptop online {lap['uptime_7d_pct']}% of the week.")
+    inc = incidents(now - 7 * 86400)
+    lines.append(f"Line incidents: {len(inc)}" + (f" ({sum(e['minutes'] for e in inc)} min)." if inc else "."))
+    r = STORE.rows("SELECT median_ms FROM (SELECT ms AS median_ms FROM sample WHERE kind='lap_ping' AND target='router' AND ts>=? AND ms IS NOT NULL)", (now - 7 * 86400,))
+    if r:
+        lines.append(f"Laptop to router over Wi-Fi: median {round(median(x[0] for x in r), 1)} ms.")
+    return {"title": "Weekly internet summary", "text": " ".join(lines), "details": {str(h): [round(median(v[0] for v in vs), 1), len(vs)] for h, vs in sorted(byhour.items())}}
 
 
 def probe_loop():
@@ -647,7 +784,8 @@ def summary():
                         "colo": json.loads(https[0][2] or "{}").get("colo")} if https else None),
         "speed_last": ({"ts": speed[0][0], **json.loads(speed[0][1] or "{}")} if speed else None),
         "speed_running": STATE["speed_running"],
-        "laptop": laptop_summary(), "laptop_request": laptop_state(),
+        "laptop": laptop_summary(), "laptop_request": laptop_state(), "laptop_wifi": laptop_wifi_diag(),
+        "laptop_every_min": STATE["laptop_every_min"], "laptop_plan": dict(STATE["laptop_plan"]) if STATE["laptop_plan"] else None,
         "laptop_speed_last": ({"ts": lspeed[0][0], **json.loads(lspeed[0][1] or "{}")} if lspeed else None),
         "labels": LABELS,
     }
@@ -663,7 +801,7 @@ def data(range_key):
     n = (now - t0) // step + 1
     agg = STORE.rows(
         "SELECT ts/?*? b, kind, target, avg(ms), avg(loss), avg(ok), max(loss) FROM sample "
-        "WHERE ts>=? AND kind IN ('ping','dns','https') GROUP BY b, kind, target", (step, step, t0))
+        "WHERE ts>=? AND kind IN ('ping','dns','https','lap_ping') GROUP BY b, kind, target", (step, step, t0))
     pick = lambda kind, col: [(r[0], r[2], r[col]) for r in agg if r[1] == kind]
     dns_fail = [(b, t, None if ok is None else 100 * (1 - ok)) for b, t, ok in pick("dns", 5)]
     s0 = (now - span) // strip_step * strip_step
@@ -699,6 +837,7 @@ def data(range_key):
     traffic = STORE.rows("SELECT ts/?*? b, avg(rx), avg(tx) FROM laptop WHERE ts>=? AND rx IS NOT NULL GROUP BY b", (step, step, t0))
     laptop = {"strip": {"t0": s0, "step": strip_step, "n": sn, "cells": cells},
               "traffic": _bucket([(b, "rx", rx) for b, rx, tx in traffic] + [(b, "tx", tx) for b, rx, tx in traffic], t0, step, n),
+              "ping_ms": _bucket(pick("lap_ping", 3), t0, step, n),
               "gaps": laptop_gaps([r for r in lrows if r[0] >= now - span], now)}
     out = {
         "range": range_key, "now": now, "step": step, "t0": t0, "n": n,
@@ -776,6 +915,9 @@ table { border-collapse: collapse; width: 100%; font-size: 13px; }
 th, td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; white-space: nowrap; }
 th:first-child, td:first-child, th.txt, td.txt { text-align: left; } th { color: var(--ink2); font-weight: 600; }
 .note { color: var(--ink2); font-size: 13px; margin-top: 18px; } .note li { margin: 3px 0; }
+.ctl { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 4px 0 8px; font-size: 14px; }
+.ctl input { font: inherit; width: 64px; padding: 4px 6px; border-radius: 8px; border: 1px solid var(--ring); background: var(--page); color: var(--ink); }
+.ctl button { font: inherit; font-size: 14px; padding: 5px 12px; border-radius: 8px; border: 1px solid var(--ring); background: var(--surface); color: var(--ink); cursor: pointer; }
 .empty { color: var(--muted); font-size: 13px; padding: 18px 0; }
 </style></head><body><main>
 <h1>Internet quality</h1>
@@ -783,9 +925,15 @@ th:first-child, td:first-child, th.txt, td.txt { text-align: left; } th { color:
 <div class="bar" id="ranges"></div>
 <div class="tiles" id="tiles"></div>
 <div id="charts"></div>
+<div class="card"><h2>Laptop test schedule</h2>
+  <p class="cap">Tests never overlap: the next one is only requested when the previous one has finished, and the spacing counts from the start of the previous test, so a slow test just shortens the wait. Each test moves up to about 0.6&nbsp;GB.</p>
+  <div id="ctl"></div></div>
 <div class="card"><h2>Laptop speed tests</h2>
   <p class="cap">Full-speed Cloudflare test run by the laptop when the Pi asks (4 parallel streams, a few seconds each way), with the laptop's link and any other traffic at that moment. A hollow dot means something else was using the line, so that result is a lower bound.</p>
   <div id="lspeed"></div></div>
+<div class="card"><h2>Laptop speed by hour of day</h2>
+  <p class="cap">Median of the clean laptop tests in the range above, by hour of the day (tests disturbed by other traffic are left out). The number above each pair is how many tests it is based on.</p>
+  <div id="hours"></div></div>
 <div class="card"><h2>Pi speed tests</h2>
   <p class="cap">Cloudflare download and upload from the Pi, every 6 hours and on demand. The Pi's 100&nbsp;Mbps Ethernet caps results near 94&nbsp;Mbps, so a faster plan reads as the cap. Use the laptop tests above for the line itself.</p>
   <div id="speed"></div></div>
@@ -858,6 +1006,9 @@ const linkText = l => !l || !l.type ? '–' : l.type === 'wifi' ? 'Wi-Fi' + (l.b
 const lp = S.laptop;
 tile('Laptop', lp ? (lp.online ? 'Online' : 'Offline') : 'Not seen yet',
   lp ? (lp.online ? 'since ' + fmtTime(lp.since, true) + ', ' + linkText(lp.link) : 'last seen ' + ago(lp.last_seen)) + (lp.uptime_24h_pct != null ? ' · up ' + lp.uptime_24h_pct + '% in 24 h' : '') : 'waiting for the first heartbeat', lp && lp.online ? 'good' : null);
+const wd = S.laptop_wifi;
+if (wd && wd.applicable) tile('Laptop Wi-Fi', wd.bad ? 'Weak link' : 'OK',
+  wd.bad ? wd.reasons.join('; ') + '. The line looks fine from the Pi.' : (wd.router_ms != null ? 'router ' + fmtMs(wd.router_ms) + ' from the laptop, ' + (wd.router_loss_pct || 0) + '% lost, last 30 min' : 'waiting for light probes'), wd.bad ? 'serious' : 'good');
 const ls = S.laptop_speed_last; tile('Laptop speed test', ls && ls.down_mbps != null ? ls.down_mbps + ' / ' + (ls.up_mbps != null ? ls.up_mbps : '–') + ' Mbps' : '–',
   ls ? 'down / up, ' + ago(ls.ts) + (ls.contended ? ', other traffic' : '') : 'none yet');
 const sp = S.speed_last; tile('Pi speed test (capped)', sp && sp.down_mbps != null ? sp.down_mbps + ' / ' + (sp.up_mbps != null ? sp.up_mbps : '–') + ' Mbps' : '–',
@@ -970,6 +1121,9 @@ lineChart(charts, 'HTTPS to Cloudflare', 'TCP connect, TLS handshake and first b
   [{label: 'HTTPS', color: '--cloudflare', values: HS.cloudflare}], {cap: 2000});
 lineChart(charts, 'Laptop network use', 'Average rate on the laptop\'s network interface per period: everything it sends and receives, qBittorrent included, but not the other devices. Useful for explaining a slow spell or a slow speed test.', 'Mbps',
   [{label: 'Download', color: '--down', values: (D.laptop.traffic || {}).rx}, {label: 'Upload', color: '--up', values: (D.laptop.traffic || {}).tx}], {fmt: v => v.toFixed(1) + ' Mbps'});
+const LPI = D.laptop.ping_ms || {};
+lineChart(charts, 'Latency from the laptop', 'Pings sent by the laptop every 10 minutes (3 s) and before each full test. The router line is the Wi-Fi hop: if it rises while the Pi\'s own router latency stays flat, the problem is the laptop\'s Wi-Fi, not the line.', 'ms',
+  [{label: 'Router (Wi-Fi)', color: '--router', values: LPI.router}, {label: L.isp, color: '--isp', values: LPI.isp}, {label: L.cloudflare, color: '--cloudflare', values: LPI.cloudflare}], {cap: 200});
 
 // speed tests: chart (if 2+ points) + table. o: {cap: Mbps limit line or null, laptop: bool}
 function speedCard(box, tests, o) {
@@ -1062,6 +1216,49 @@ function laptopPresence(parent) {
 }
 laptopPresence(charts);
 
+// schedule and series controls
+(function () {
+  const box = document.getElementById('ctl'); const api = async (path, body) => { try { const r = await fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)}); return await r.json(); } catch (e) { return {ok: false, reason: 'Request failed'}; } };
+  const num = (v, w) => { const i = el('input', {type: 'number', min: 0, value: v, 'aria-label': w}); return i; };
+  const msg = el('div', {class: 'sub'}); const done = j => { msg.textContent = j.ok ? 'Saved. Reloading…' : (j.reason || 'Not saved'); if (j.ok) setTimeout(() => location.reload(), 800); };
+  const r1 = el('div', {class: 'ctl'}); const every = num(S.laptop_every_min, 'Minutes between scheduled tests');
+  const save = el('button', {type: 'button'}, 'Save'); save.onclick = async () => done(await api('api/laptop/settings', {every_min: Number(every.value)}));
+  r1.append(document.createTextNode('Scheduled test every'), every, document.createTextNode('minutes (0 = off, otherwise 5 to 1440)'), save);
+  const r2 = el('div', {class: 'ctl'}); const cnt = num(5, 'Number of tests'), gap = num(0, 'Minutes apart');
+  const go = el('button', {type: 'button'}, 'Start series'); go.onclick = async () => done(await api('api/laptop/series', {count: Number(cnt.value), interval_min: Number(gap.value)}));
+  r2.append(document.createTextNode('Run'), cnt, document.createTextNode('tests,'), gap, document.createTextNode('minutes apart (0 = one right after the other)'), go);
+  box.append(r1, r2);
+  const P = S.laptop_plan;
+  if (P) { const r3 = el('div', {class: 'ctl'}); r3.append(document.createTextNode('Series running: ' + P.remaining + ' of ' + P.total + ' still to start, every ' + (P.interval || 'back to back') + (P.interval ? ' min' : '') + '. The schedule above resumes afterwards. '));
+    const cancel = el('button', {type: 'button'}, 'Cancel series'); cancel.onclick = async () => done(await api('api/laptop/series', {cancel: true})); r3.append(cancel); box.append(r3); }
+  box.append(msg);
+})();
+
+// speed by hour of day (clean laptop tests in the shown range)
+(function () {
+  const box = document.getElementById('hours'); const t = (D.speed || []).filter(s => s.source === 'laptop' && s.down_mbps != null && !s.contended);
+  const by = {}; for (const s of t) (by[new Date(s.ts * 1000).getHours()] = by[new Date(s.ts * 1000).getHours()] || []).push(s);
+  if (t.length < 4) { box.append(el('div', {class: 'empty'}, 'Needs a few clean laptop tests in this range.')); return; }
+  const med = a => { a = a.slice().sort((x, y) => x - y); const m = a.length >> 1; return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
+  const lg = el('div', {class: 'legend'}); for (const [lab, c] of [['Download', '--down'], ['Upload', '--up']]) { const i = el('span'); const k = el('span', {class: 'sw'}); k.style.background = css(c); i.append(k, document.createTextNode(lab)); lg.append(i); } box.append(lg);
+  const wrap = el('div', {class: 'chart'}); box.append(wrap);
+  const draw = () => { wrap.querySelectorAll('svg').forEach(e => e.remove());
+    const W = Math.max(300, wrap.clientWidth), H = 190, m = {l: 44, r: 8, t: 18, b: 22}, pw = W - m.l - m.r, ph = H - m.t - m.b, bw = pw / 24;
+    let top = 0; for (const h in by) { top = Math.max(top, med(by[h].map(s => s.down_mbps)), med(by[h].map(s => s.up_mbps || 0))); }
+    const nice = x => { const p = Math.pow(10, Math.floor(Math.log10(x || 1))); for (const f of [1, 2, 2.5, 5, 10]) if (f * p >= x) return f * p; return 10 * p; };
+    const yMax = nice(top * 1.05), Y = v => m.t + ph - v / yMax * ph;
+    const svg = svgEl('svg', {viewBox: `0 0 ${W} ${H}`, height: H, role: 'img', 'aria-label': 'Median laptop speed by hour of day'});
+    for (let k = 0; k <= 4; k++) { const y = Y(k * yMax / 4); svg.append(svgEl('line', {x1: m.l, x2: m.l + pw, y1: y, y2: y, stroke: k ? css('--grid') : css('--axis'), 'stroke-width': 1}));
+      const tx = svgEl('text', {x: m.l - 6, y: y + 4, 'text-anchor': 'end'}); tx.textContent = Math.round(k * yMax / 4); svg.append(tx); }
+    for (let h = 0; h < 24; h++) { const x0 = m.l + h * bw; if (h % 3 === 0) { const tx = svgEl('text', {x: x0 + bw / 2, y: H - 6, 'text-anchor': 'middle'}); tx.textContent = String(h).padStart(2, '0'); svg.append(tx); }
+      const g = by[h]; if (!g) continue; const d = med(g.map(s => s.down_mbps)), u = med(g.map(s => s.up_mbps || 0));
+      for (const [v, c, off] of [[d, '--down', 0], [u, '--up', 0.5]]) { const r = svgEl('rect', {x: x0 + bw * (0.08 + off * 0.42), y: Y(v), width: bw * 0.4, height: Math.max(1, m.t + ph - Y(v)), fill: css(c), rx: 2});
+        const ti = svgEl('title', {}); ti.textContent = String(h).padStart(2, '0') + ':00  ' + (off ? 'upload ' : 'download ') + v.toFixed(0) + ' Mbps, ' + g.length + ' tests'; r.append(ti); svg.append(r); }
+      const n = svgEl('text', {x: x0 + bw / 2, y: Y(Math.max(d, u)) - 4, 'text-anchor': 'middle'}); n.textContent = g.length; svg.append(n); }
+    wrap.prepend(svg); };
+  draw(); let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(draw, 150); });
+})();
+
 // incidents
 (function () { const box = document.getElementById('inc'); const inc = D.incidents || [];
   if (!inc.length) { box.append(el('div', {class: 'empty'}, 'None in this range.')); return; }
@@ -1093,6 +1290,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, PAGE.replace("__DATA__", payload).encode(), "text/html; charset=utf-8")
             elif url.path == "/api/summary":
                 self._send(200, json.dumps(summary()).encode(), "application/json")
+            elif url.path == "/api/weekly":
+                self._send(200, json.dumps(weekly_summary()).encode(), "application/json")
             elif url.path == "/api/data":
                 self._send(200, json.dumps(data(rng)).encode(), "application/json")
             else:
@@ -1118,7 +1317,32 @@ class Handler(BaseHTTPRequestHandler):
         body = self._json_body()
         if body is None:
             return self._send(400, b"bad request\n", "text/plain")
-        reply = laptop_poll(body) if path == "/api/laptop/poll" else laptop_result(body)
+        reply = {"/api/laptop/poll": laptop_poll, "/api/laptop/light": laptop_light}.get(path, laptop_result)(body)
+        self._send(200, json.dumps(reply).encode(), "application/json")
+
+    def _laptop_control(self, path):
+        """Schedule and series controls on the page (open on the LAN, like the speed test buttons)."""
+        body = self._json_body() or {}
+        num = lambda k, lo, hi: (lambda v: v if isinstance(v, (int, float)) and not isinstance(v, bool) and lo <= v <= hi else None)(body.get(k))
+        with LAPTOP_LOCK:
+            if path == "/api/laptop/settings":
+                v = num("every_min", 0, 1440)
+                if v is None or 0 < v < 5:
+                    reply = {"ok": False, "reason": "Use 0 (off) or 5 to 1440 minutes"}
+                else:
+                    STATE["laptop_every_min"] = float(v)
+                    save_settings()
+                    reply = {"ok": True}
+            elif body.get("cancel"):
+                STATE["laptop_plan"] = None
+                reply = {"ok": True}
+            else:
+                count, gap = num("count", 1, 50), num("interval_min", 0, 1440)
+                if count is None or gap is None:
+                    reply = {"ok": False, "reason": "Tests: 1 to 50. Minutes apart: 0 to 1440"}
+                else:
+                    STATE["laptop_plan"] = {"remaining": int(count), "total": int(count), "interval": float(gap)}
+                    reply = {"ok": True}
         self._send(200, json.dumps(reply).encode(), "application/json")
 
     def _laptop_button(self):
@@ -1143,11 +1367,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         url = urlparse(self.path)
-        if url.path in ("/api/laptop/poll", "/api/laptop/result"):
+        if url.path in ("/api/laptop/poll", "/api/laptop/result", "/api/laptop/light"):
             try:
                 return self._laptop(url.path)
             except Exception as exc:
                 return self._send(500, f"error: {type(exc).__name__}\n".encode(), "text/plain")
+        if url.path in ("/api/laptop/settings", "/api/laptop/series"):
+            return self._laptop_control(url.path)
         if url.path != "/api/speedtest":
             return self._send(404, b"not found\n", "text/plain")
         if parse_qs(url.query).get("source", [""])[0] == "laptop":
@@ -1211,6 +1437,11 @@ def demo_data(store, days=7):
         torrent = 19 <= hour <= 22
         store.add_laptop(ts, up, susp, round(rnd.random() * 3 + (60 if torrent else 0), 2), round(rnd.random() + (30 if torrent else 0), 2),
                          {"iface": "wlp7s0", "link": {"type": "wifi", "band": "5", "signal_dbm": -57, "rate_mbps": 780}, "qbit": torrent})
+        if ts % 600 < 60:
+            bad = (now - 2 * 86400) <= ts < (now - 2 * 86400 + 5400)       # a spell of bad Wi-Fi
+            for name, base in (("router", 2.0), ("isp", 4.0), ("cloudflare", 33.0)):
+                ms = round(base * (12 if bad and name != "cloudflare" else 1) * (1 + rnd.random() * 0.2), 1)
+                store.add(ts, "lap_ping", name, True, ms, 0.1 if bad else 0.0, {"jitter": 0.4})
         if ts % 3600 < 60:
             down = round(rnd.uniform(300, 560) * (0.5 if torrent else 1), 1)
             store.add(ts, "speed", "laptop", True, down, None,
@@ -1229,6 +1460,7 @@ def main():
     STORE = Store(DB_PATH)
     last = STORE.rows("SELECT max(ts) FROM sample WHERE kind='speed' AND target='laptop'")[0][0]
     STATE["laptop_last_start"] = float(last or 0)
+    load_settings()
     demo = "--demo" in sys.argv
     if demo:
         demo_data(STORE)

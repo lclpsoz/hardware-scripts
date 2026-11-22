@@ -393,7 +393,8 @@ def speed_test(run, link_before):
         if rate and other_dir is not None and other_dir > max(8.0, 0.12 * rate):
             contended = True
             notes.append(f"other traffic during {phase}load: {other_dir:g} Mbps")
-    if max(pre_down, pre_up) > 5:
+    # background traffic before the test counts only if it is big next to what the line then delivered
+    if pre_down > max(5.0, 0.10 * (down.get("mbps") or 0)) or pre_up > max(5.0, 0.10 * (up.get("mbps") or 0)):
         contended = True
         notes.append(f"other traffic before the test: ↓{pre_down:g} ↑{pre_up:g} Mbps")
     if qbit.get("api") and (qbit["dl_mbps"] > 5 or qbit["ul_mbps"] > 5):
@@ -422,7 +423,7 @@ def speed_test(run, link_before):
         "jitter_ms": ms(idle.get("cloudflare"), "jitter_ms"), "jitter_loaded_ms": ms(down["loaded"].get("cloudflare"), "jitter_ms"),
         "loss_idle_pct": ms(idle.get("cloudflare"), "loss_pct"),
         "loss_loaded_pct": max(loaded_loss) if loaded_loss else None,
-        "link": link, "iface": iface, "bg": bg, "qbit": qbit, "contended": contended, "notes": notes,
+        "idle": idle, "link": link, "iface": iface, "bg": bg, "qbit": qbit, "contended": contended, "notes": notes,
         "colo": trace_colo(),
     }
     if errors:
@@ -456,11 +457,16 @@ def describe(result):
     return where
 
 
-def main():
-    if not TOKEN:
-        log("NETQ_TOKEN is not set")
-        return 1
-    state = load_state()
+def light_probe(spec):
+    """3 s of pings to the router, the ISP gateway and Cloudflare: no downloads, so no data cost."""
+    gateway, iface = default_route()
+    targets = {k: v for k, v in (spec.get("ping") or {}).items() if k in ("router", "isp", "cloudflare")}
+    targets["router"] = gateway or targets.get("router")
+    return {"ping": ping_many(targets, float(spec.get("secs", 3))), "link": link_info(iface)}
+
+
+def one_round(state):
+    """One heartbeat and whatever the Pi asks for. Returns True if a full test ran."""
     body, hb_state = heartbeat(state)
     try:
         answer = post("/api/laptop/poll", body)
@@ -469,23 +475,29 @@ def main():
             log(f"netq refused the heartbeat: HTTP {exc.code} (wrong NETQ_TOKEN, or the token is not set on the Pi?)")
         state["status"] = f"http{exc.code}"
         save_state(state)
-        return 0
+        return False
     except (OSError, ValueError) as exc:
         # Normal away from home: net.lan does not resolve. Log only the change, not every minute.
         if state.get("status") != "unreachable":
             log(f"netq not reachable ({type(exc).__name__}); probably away from home. Heartbeats resume on their own.")
         state["status"] = "unreachable"
         save_state(state)
-        return 0
+        return False
     if state.get("status") not in (None, "ok"):
         log("heartbeat to netq works again")
     state["status"] = "ok"
     state["hb"] = hb_state
     save_state(state)
 
+    light = answer.get("light")
+    if light:
+        try:
+            post("/api/laptop/light", light_probe(light), timeout=10)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
     run = answer.get("run")
     if not run:
-        return 0
+        return False
     log(f"speed test requested ({run.get('trigger')}, id {run.get('id')}); {describe(body)}")
     signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(TimeoutError("test took too long")))
     signal.alarm(150)
@@ -499,19 +511,33 @@ def main():
         reply = post("/api/laptop/result", {"id": run.get("id"), "result": result}, timeout=10)
     except (OSError, ValueError) as exc:
         log(f"could not send the result to netq ({type(exc).__name__}): {result.get('down_mbps')} / {result.get('up_mbps')} Mbps")
-        return 0
+        return True
     log(f"result {result.get('down_mbps')} / {result.get('up_mbps')} Mbps, idle {result.get('idle_ms')} ms, "
         f"loaded {result.get('loaded_ms')} ms, {describe(result)}{', contended: ' + '; '.join(result['notes']) if result.get('contended') else ''}")
 
     base, down = reply.get("baseline_down_mbps"), result.get("down_mbps")
     if base and down is not None and not result.get("contended") and down < 0.5 * base:
-        last = state.get("last_low_notice", 0)
-        if time.time() - last > 3 * 3600:
+        if time.time() - state.get("last_low_notice", 0) > 3 * 3600:
             state["last_low_notice"] = time.time()
             save_state(state)
             out("NOTIFY", "Laptop speed test is low",
                 f"{down:g} Mbps down against {base:g} usual ({describe(result)}), nothing else was using the line. "
                 f"Up {result.get('up_mbps')} Mbps, loaded latency {result.get('loaded_ms')} ms. Details: http://net.lan", 3, "chart_with_downwards_trend")
+    return True
+
+
+def main():
+    if not TOKEN:
+        log("NETQ_TOKEN is not set")
+        return 1
+    state = load_state()
+    started = time.time()
+    # A series with no gap ("N tests in a row") is handed out one test per heartbeat; keep going, with a
+    # heartbeat between tests so the Pi does not see the laptop as gone. Never more than 15 minutes.
+    for _ in range(40):
+        if not one_round(state) or time.time() - started > 900:
+            break
+        state = load_state()
     return 0
 
 
