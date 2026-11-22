@@ -222,6 +222,7 @@
         <label class="f">Address to try first (optional)<input type="text" id="s_presence_ip" maxlength="15" style="width:100%" placeholder="192.168.0.6"></label>
         <label class="f">Ping every (s)<input type="number" id="s_presence_every_s" min="10" max="300"></label>
         <label class="f">Away after no sign for (min)<input type="number" id="s_presence_away_min" min="1" max="240"></label>
+        <label class="f">Street phone battery warning (%)<input type="number" id="s_battery_warn_pct" min="5" max="90"></label>
       </div>
       <p class="hint" style="margin-top:14px">Snooze buttons: minutes, and the sitting time under which each is offered (0 = always). A notification shows up to 3 snooze buttons (the longest offered at that moment); this page shows all of them.</p>
       <div id="snzOpts"></div>
@@ -303,7 +304,7 @@ const MODES = { watching: 'watching', away: 'away · paused', snoozed: 'snoozed'
 const NOTIF_META = [
   ['level1', 'Level 1 · light', true], ['level2', 'Level 2 · mid', true], ['level3', 'Level 3 · high', true], ['level4', 'Level 4 · constant', true],
   ['giveup', 'Quiet reminder after the loud phase', 'repeat'], ['moved', 'Moved enough (timer reset)', false], ['snoozed', 'Snoozed (confirmation)', false],
-  ['snooze_end', 'Snooze ended', false], ['silent', 'Phone silent', false]];
+  ['snooze_end', 'Snooze ended', false], ['silent', 'Phone silent', false], ['battery', 'Street phone battery low', 'repeat']];
 const PRIOS = [[1, '1 · min (hidden)'], [2, '2 · low (silent)'], [3, '3 · default (sound)'], [4, '4 · high (+ vibration)'], [5, '5 · max (loudest)']];
 function field(label, input, cls) { const l = document.createElement('label'); l.className = 'f' + (cls ? ' ' + cls : ''); l.appendChild(document.createTextNode(label)); l.appendChild(input); return l; }
 function inp(type, id, attrs) { const i = document.createElement('input'); i.type = type; i.id = id; Object.entries(attrs || {}).forEach(([k, v]) => i.setAttribute(k, v)); return i; }
@@ -344,7 +345,7 @@ function fillForm(s) {
   $('s_move_steps').value = s.move_steps;
   $('s_move_window_min').value = Math.round(s.move_window_s / 60); $('s_stale_min').value = s.stale_min;
   $('s_presence_enabled').checked = s.presence_enabled; $('s_presence_name').value = s.presence_name; $('s_presence_mac').value = s.presence_mac; $('s_presence_ip').value = s.presence_ip;
-  $('s_presence_every_s').value = s.presence_every_s; $('s_presence_away_min').value = s.presence_away_min;
+  $('s_presence_every_s').value = s.presence_every_s; $('s_presence_away_min').value = s.presence_away_min; $('s_battery_warn_pct').value = s.battery_warn_pct;
   $('s_phone_alarm').checked = s.phone_alarm; $('s_alarm_package').value = s.alarm_package; $('s_alarm_ring_s').value = s.alarm_ring_s; $('s_loud_limit_min').value = s.loud_limit_min; $('s_backoff_max_s').value = s.backoff_max_s; $('s_notif_backoff_max_s').value = s.notif_backoff_max_s;
   for (let i = 0; i < 4; i++) { const o = s.snooze_opts[i]; $('o' + i + 'm').value = o ? o[0] : ''; $('o' + i + 'b').value = o ? o[1] : ''; }
   $('s_report_idle_s').value = s.report_idle_s; $('s_report_walk_s').value = s.report_walk_s; $('s_walk_spm').value = s.walk_spm;
@@ -377,7 +378,7 @@ function readForm() {
     move_steps: Number($('s_move_steps').value),
     move_window_s: Number($('s_move_window_min').value) * 60, stale_min: Number($('s_stale_min').value),
     presence_enabled: $('s_presence_enabled').checked, presence_name: $('s_presence_name').value, presence_mac: $('s_presence_mac').value,
-    presence_ip: $('s_presence_ip').value, presence_every_s: Number($('s_presence_every_s').value), presence_away_min: Number($('s_presence_away_min').value),
+    presence_ip: $('s_presence_ip').value, presence_every_s: Number($('s_presence_every_s').value), presence_away_min: Number($('s_presence_away_min').value), battery_warn_pct: Number($('s_battery_warn_pct').value),
     phone_alarm: $('s_phone_alarm').checked, alarm_package: $('s_alarm_package').value, alarm_ring_s: Number($('s_alarm_ring_s').value), loud_limit_min: Number($('s_loud_limit_min').value), backoff_max_s: Number($('s_backoff_max_s').value), notif_backoff_max_s: Number($('s_notif_backoff_max_s').value), snooze_opts: opts,
     report_idle_s: Number($('s_report_idle_s').value), report_walk_s: Number($('s_report_walk_s').value), walk_spm: Number($('s_walk_spm').value),
     quiet_enabled: $('s_quiet_enabled').checked, quiet_start: $('s_quiet_start').value, quiet_end: $('s_quiet_end').value,

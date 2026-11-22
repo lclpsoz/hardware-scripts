@@ -95,10 +95,12 @@ NOTIF_DEFAULTS = {
     # After the loud phase of level 4 (loud_limit_min) all sound stops and this quiet one repeats instead.
     "giveup": {"title": "Still sitting", "msg": "{min} min without moving. Sounds are paused until you move.", "prio": 2, "repeat_s": 900},
     "snooze_end": {"title": "Snooze ended", "msg": "Snooze over, the sitting timer continues at {min} min.", "prio": 2},
+    # Street phone battery: sent when an upload shows it at or below battery_warn_pct and unplugged; repeat_s = min gap.
+    "battery": {"title": "Charge the street phone", "msg": "Street phone battery is at {battery}%. Plug it in.", "prio": 4, "repeat_s": 840},
     "silent": {"title": "Steps: phone silent", "msg": "No step data from the phone for {stale} min; reminders paused.", "prio": 2},
 }
 TAGS = {"level1": "walking", "level2": "warning", "level3": "rotating_light", "level4": "rotating_light",
-        "moved": "tada", "snoozed": "zzz", "snooze_end": "alarm_clock", "giveup": "hourglass_flowing_sand", "silent": "warning"}
+        "moved": "tada", "snoozed": "zzz", "snooze_end": "alarm_clock", "giveup": "hourglass_flowing_sand", "silent": "warning", "battery": "battery"}
 DEFAULTS = {
     "enabled": True,
     "levels_min": [float(x) for x in E("LEVELS_MIN", "50,60,70,80").split(",")],
@@ -125,6 +127,7 @@ DEFAULTS = {
     "presence_mac": E("PRESENCE_MAC", "").lower(),      # the street phone's Wi-Fi address (its IP changes); empty = presence check off
     "presence_ip": E("PRESENCE_IP", ""),                # optional extra address to try first
     "presence_every_s": 60,                             # ping the phone this often
+    "battery_warn_pct": 40,                             # street phone: warn at or below this battery % (when not charging)
     "presence_away_min": 8,                             # no ping reply for this long = away
 }
 WALK_HOLD_S = 60      # keep reporting fast this long after the last walking seen
@@ -134,7 +137,8 @@ lock = threading.Lock()
 S = {"last_move": time.time(), "snooze_start": 0.0, "snooze_until": 0.0, "snooze_kind": "", "last_sample": 0.0, "walk_until": 0.0, "stats_flush": 0.0, "alarm_test": 0, "last_alarm": 0.0, "last_alarm_level": 0,
      "l4_since": 0.0, "l4_repeat": 0, "l4_alarm_repeat": 0, "quiet_phase": False,
      "timers_out": False, "dismiss": False,
-     "street": {"last_t": 0.0, "last_n": None, "uploaded_at": 0.0},
+     "street": {"last_t": 0.0, "last_n": None, "uploaded_at": 0.0, "battery": None, "plugged": None},
+     "batt_told": 0.0,
      "away": False, "away_start": 0.0, "last_home": time.time(), "phone_ip": "", "last_ping": None,
      "stale_told": False, "level_sent": 0, "last_repeat": 0.0, "steps": None, "started": time.time()}
 samples = deque()
@@ -310,7 +314,7 @@ def load():
         S["last_ping"] = pings[-1]
     sj = read_json("street.json")
     if isinstance(sj, dict) and isinstance(sj.get("last_n"), int):
-        S["street"].update({k: sj[k] for k in ("last_t", "last_n", "uploaded_at") if k in sj})
+        S["street"].update({k: sj[k] for k in ("last_t", "last_n", "uploaded_at", "battery", "plugged") if k in sj})
     st = read_json("stats.json")
     if isinstance(st, dict):
         stats.update(st)
@@ -363,6 +367,7 @@ def validate(d):
     num("walk_spm", 5, 200)
     num("presence_every_s", 10, 300)
     num("presence_away_min", 1, 240)
+    num("battery_warn_pct", 5, 90)
     if "presence_mac" in d:
         mac = str(d["presence_mac"]).strip().lower()
         if re.fullmatch(r"([0-9a-f]{2}:){5}[0-9a-f]{2}", mac):
@@ -767,6 +772,21 @@ def add_street(rows):
     return total, did
 
 
+def street_battery(pct, plugged, t):
+    """The street phone reports its battery with each upload (so only while home, when you can charge it).
+    Warn the main phone at or below battery_warn_pct unless it is charging or in quiet hours, at most once per repeat_s.
+    Caller holds the lock."""
+    st = S["street"]
+    st["battery"], st["plugged"] = pct, plugged
+    write_json("street.json", st)
+    gap = SET["notif"]["battery"]["repeat_s"]
+    if (pct <= SET["battery_warn_pct"] and not plugged and SET["enabled"] and not in_quiet(t)
+            and t - S["batt_told"] >= gap):
+        S["batt_told"] = t
+        send("battery", battery=pct)
+        log("street phone battery", pct, "%: warned")
+
+
 def add_sample(n, manual=False):
     """Record a report. Returns how many seconds the phone should wait before the next one.
     manual=True marks a report made from the debug tools (drawn as a hollow dot)."""
@@ -930,7 +950,7 @@ def presence_state(t):
             "away_for_min": round((t - S["away_start"]) / 60, 1) if S["away"] else 0,
             "last_ping": lp, "ok_1h": sum(x[1] for x in recent), "n_1h": len(recent),
             "street": {"upload_age_s": round(t - S["street"]["uploaded_at"]) if S["street"]["uploaded_at"] else None,
-                       "counter": S["street"]["last_n"], "steps_today": day(t).get("street", 0)}}
+                       "counter": S["street"]["last_n"], "battery": S["street"]["battery"], "plugged": S["street"]["plugged"], "steps_today": day(t).get("street", 0)}}
 
 
 def state(t):
@@ -1021,11 +1041,15 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/steps/batch" and self.command == "POST":
                 if (q.get("device") or [""])[0] != "street":
                     return self.reply(400, {"error": "device must be street"})
-                rows = self.body_json(32768)["samples"]
+                body = self.body_json(32768)
+                rows = body["samples"]
                 if not isinstance(rows, list) or len(rows) > 2000:
                     return self.reply(400, {"error": "samples must be a list of up to 2000 [time, counter]"})
                 with lock:
                     total, did = add_street(rows)
+                    b = body.get("battery")        # optional: {"pct": 0-100, "plugged": bool}
+                    if isinstance(b, dict) and isinstance(b.get("pct"), (int, float)) and 0 <= b["pct"] <= 100:
+                        street_battery(int(b["pct"]), bool(b.get("plugged")), time.time())
                     flush_stats()
                 return self.reply(200, {"ok": True, "credited": total, "reset": did})
             if u.path == "/snooze":

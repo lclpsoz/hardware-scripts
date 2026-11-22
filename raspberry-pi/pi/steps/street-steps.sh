@@ -22,6 +22,14 @@ tail -n 700 "$Q" > "$Q.tmp" && mv "$Q.tmp" "$Q"        # keep about a week at on
 
 cnt=$(wc -l < "$Q")
 body=$(head -n "$cnt" "$Q" | awk 'BEGIN{printf "{\"samples\":["} {printf "%s[%s,%s]", (NR>1?",":""), $1, $2} END{print "]}"}')
+# Battery goes along with the upload (read only here, so nothing extra while out of the house). The Pi warns
+# the main phone when it is low and not charging. Output goes to a file for the same reason as the sensor.
+BT=$(mktemp)
+timeout -k 2 10 termux-battery-status > "$BT" 2>/dev/null < /dev/null
+pct=$(grep -oE '"percentage": *[0-9]+' "$BT" | grep -oE '[0-9]+$')
+grep -qE '"status": *"(CHARGING|FULL)"' "$BT" && plugged=true || plugged=false
+rm -f "$BT"
+[ -n "$pct" ] && body="${body%\}},\"battery\":{\"pct\":$pct,\"plugged\":$plugged}}"
 if r=$(curl -fsS -m 10 --connect-timeout 4 -X POST -H "X-Token: $TOKEN" -H "Content-Type: application/json" \
        -d "$body" "$PI/steps/batch?device=street" 2>&1); then
   tail -n +$((cnt + 1)) "$Q" > "$Q.tmp"; mv "$Q.tmp" "$Q"    # sent: drop exactly what was sent
