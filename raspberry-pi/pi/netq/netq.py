@@ -73,7 +73,8 @@ LAPTOP_EVERY_MIN = float(env("NETQ_LAPTOP_SPEED_EVERY_MIN", "30"))    # default;
 LAPTOP_LIGHT_EVERY_MIN = float(env("NETQ_LAPTOP_LIGHT_EVERY_MIN", "10"))   # 3 s ping-only probe between full tests; 0 = off
 SETTINGS_PATH = env("NETQ_SETTINGS", "/data/laptop.json")
 LAPTOP_RUN = {"down_secs": float(env("NETQ_LAPTOP_DOWN_SECS", "8")), "up_secs": float(env("NETQ_LAPTOP_UP_SECS", "6")),
-              "streams": int(env("NETQ_LAPTOP_STREAMS", "4")), "max_mb": int(env("NETQ_LAPTOP_MAX_MB", "300"))}
+              "streams": int(env("NETQ_LAPTOP_STREAMS", "4")), "max_mb": int(env("NETQ_LAPTOP_MAX_MB", "200")),
+              "down_source": env("NETQ_LAPTOP_DOWN_SOURCE", "google")}   # google (default) or cloudflare; see netprobe/probe.py
 LAPTOP_SEEN_S = 150          # no heartbeat for this long = the laptop is gone (heartbeats come every ~60 s)
 LAPTOP_REQ_TTL = 900         # a request nobody picked up in 15 min is dropped
 LAPTOP_RUN_TTL = 150         # a test that never reported back in 150 s is recorded as failed
@@ -1168,7 +1169,7 @@ function speedCard(box, tests, o) {
     if (o.laptop) {
       const bg = s.bg || {}, q = s.qbit || {};
       const other = bg.pre_down_mbps != null ? '↓' + bg.pre_down_mbps + ' ↑' + bg.pre_up_mbps + (q.running ? ' (qBittorrent running)' : '') : '–';
-      const notes = base.concat(s.contended ? ['not a clean line test'] : [], s.notes || [], s.link && s.link.wifi_retries ? [s.link.wifi_retries + ' Wi-Fi retries'] : [], s.down_error ? ['download: ' + s.down_error] : [], s.up_error ? ['upload: ' + s.up_error] : []).join(', ');
+      const notes = base.concat(s.down_source ? ['download from ' + s.down_source] : [], s.contended ? ['not a clean line test'] : [], s.notes || [], s.link && s.link.wifi_retries ? [s.link.wifi_retries + ' Wi-Fi retries'] : [], s.down_error ? ['download: ' + s.down_error] : [], s.up_error ? ['upload: ' + s.up_error] : []).join(', ');
       cells = [fmtTime(s.ts, true), mb(s.down_mbps), mb(s.up_mbps), fmtMs(s.idle_ms), fmtMs(s.loaded_ms), s.router_idle_ms != null ? fmtMs(s.router_idle_ms) + ' → ' + fmtMs(s.router_loaded_ms) : '–', linkText(s.link), other, notes];
     } else {
       const notes = base.concat(s.uv ? ['undervoltage during test'] : [], s.down_error ? ['download: ' + s.down_error] : [], s.up_error ? ['upload: ' + s.up_error] : []).join(', ');

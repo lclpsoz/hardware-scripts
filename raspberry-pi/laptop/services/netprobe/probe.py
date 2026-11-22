@@ -33,7 +33,15 @@ STATE_FILE = os.path.join(STATE_DIR, "netprobe.hb.json")
 SPEED_HOST = "speed.cloudflare.com"
 UA = "netprobe/1.0 (home network quality, laptop side)"
 MAX_BETWEEN_S = 150          # a heartbeat older than this means the laptop was gone (off, asleep or away)
-DOWN_REQUEST = 50_000_000    # bytes asked per download request; a stream starts a new request when one ends
+DOWN_REQUEST = 99_000_000    # Cloudflare's maximum per request is just under 100 MB (100 MB gets a 403)
+# Download sources. Cloudflare rate-limits by IP address after a few GB (HTTP 429 with Retry-After of about
+# 45 minutes, and the Pi's own tests share that limit), so downloads come from Google's download servers by
+# default (a 150 MB file, fetched with Range, no limit seen) and Cloudflare is the fallback.
+SOURCES = {
+    "google": {"host": "dl.google.com", "path": "/linux/direct/google-chrome-stable_current_amd64.deb", "headers": {"Range": "bytes=0-"}},
+    "cloudflare": {"host": SPEED_HOST, "path": f"/__down?bytes={DOWN_REQUEST}", "headers": {}},
+}
+DEFAULT_RETRY_AFTER_S = 3000
 UP_REQUEST = 10_000_000
 
 
@@ -239,7 +247,7 @@ def ping_many(targets, secs):
     return res
 
 
-def transfer_phase(kind, secs, streams, budget_bytes, iface, targets, errors):
+def transfer_phase(kind, secs, streams, budget_bytes, iface, targets, errors, source="cloudflare", info=None):
     """Run `streams` parallel transfers for up to `secs`, sampling the byte counters every 0.1 s.
     Returns the rate over the steady part (after warm-up), the traffic of everything else on this
     interface during that part, and the latency to `targets` measured while the line was loaded."""
@@ -248,14 +256,22 @@ def transfer_phase(kind, secs, streams, budget_bytes, iface, targets, errors):
     ctx = ssl.create_default_context()
     buf = os.urandom(1 << 20)
 
+    src = SOURCES[source]
+
     def down(i):
         while not stop.is_set():
             try:
-                conn = http.client.HTTPSConnection(SPEED_HOST, 443, timeout=10, context=ctx)
-                conn.request("GET", f"/__down?bytes={DOWN_REQUEST}", headers={"User-Agent": UA})
+                conn = http.client.HTTPSConnection(src["host"], 443, timeout=10, context=ctx)
+                conn.request("GET", src["path"], headers=dict(src["headers"], **{"User-Agent": UA}))
                 resp = conn.getresponse()
-                if resp.status != 200:
+                if resp.status not in (200, 206):
                     errors.append(f"download HTTP {resp.status}")
+                    if info is not None and resp.status == 429:
+                        try:
+                            info["retry_after"] = int(resp.getheader("Retry-After") or DEFAULT_RETRY_AFTER_S)
+                        except ValueError:
+                            info["retry_after"] = DEFAULT_RETRY_AFTER_S
+                    conn.close()
                     return
                 while not stop.is_set():
                     chunk = resp.read(262144)
@@ -289,6 +305,11 @@ def transfer_phase(kind, secs, streams, budget_bytes, iface, targets, errors):
                 resp.read()
                 if resp.status != 200:
                     errors.append(f"upload HTTP {resp.status}")
+                    if info is not None and resp.status == 429:
+                        try:
+                            info["retry_after"] = int(resp.getheader("Retry-After") or DEFAULT_RETRY_AFTER_S)
+                        except ValueError:
+                            info["retry_after"] = DEFAULT_RETRY_AFTER_S
                     return
                 conn.close()
             except (OSError, ssl.SSLError, http.client.HTTPException) as exc:
@@ -339,7 +360,7 @@ def transfer_phase(kind, secs, streams, budget_bytes, iface, targets, errors):
     return res
 
 
-def speed_test(run, link_before):
+def speed_test(run, link_before, cooldowns):
     started = time.time()
     gateway, iface = default_route()
     targets = {k: v for k, v in (run.get("ping") or {}).items() if k in ("router", "isp", "cloudflare")}
@@ -357,11 +378,38 @@ def speed_test(run, link_before):
     b1 = iface_bytes(iface) or (0, 0)
     pre_down, pre_up = round((b1[0] - b0[0]) * 8 / dt / 1e6, 1), round((b1[1] - b0[1]) * 8 / dt / 1e6, 1)
 
-    budget = int(run.get("max_mb", 300)) * 1_000_000
+    budget = int(run.get("max_mb", 200)) * 1_000_000
     streams = int(run.get("streams", 4))
-    down = transfer_phase("down", float(run.get("down_secs", 8)), streams, budget, iface, targets, errors)
+    preferred = run.get("down_source") if run.get("down_source") in SOURCES else "google"
+    down, down_source, rate_limited = {}, None, False
+    for source in [preferred] + [k for k in SOURCES if k != preferred]:
+        if cooldowns.get(source, 0) > time.time():
+            notes.append(f"{source} skipped: rate limited until {time.strftime('%H:%M', time.localtime(cooldowns[source]))}")
+            continue
+        attempt_errors, info = [], {}
+        down = transfer_phase("down", float(run.get("down_secs", 8)), streams, budget, iface, targets, attempt_errors, source, info)
+        if down.get("mbps") is not None:
+            down_source = source
+            errors.extend(attempt_errors)
+            if source != preferred:
+                notes.append(f"download from {source}: {preferred} failed")
+            break
+        errors.extend(f"{source}: {e}" for e in attempt_errors)
+        if "retry_after" in info:
+            cooldowns[source] = time.time() + info["retry_after"]
+            rate_limited = True
+            notes.append(f"{source} rate limited the download for {info['retry_after'] // 60} min")
+    down = down or {"loaded": {}}
     api1 = qbit_rates(qbit["running"])
-    up = transfer_phase("up", float(run.get("up_secs", 6)), streams, budget, iface, targets, errors)
+    if cooldowns.get("cloudflare-up", 0) > time.time():
+        up = {"loaded": {}}
+        notes.append("upload skipped: Cloudflare rate limit")
+    else:
+        up_info = {}
+        up = transfer_phase("up", float(run.get("up_secs", 6)), streams, budget, iface, targets, errors, "cloudflare", up_info)
+        if "retry_after" in up_info:
+            cooldowns["cloudflare-up"] = time.time() + up_info["retry_after"]
+            notes.append(f"Cloudflare rate limited the upload for {up_info['retry_after'] // 60} min")
     api2 = qbit_rates(qbit["running"])
 
     link = link_info(iface)
@@ -414,7 +462,7 @@ def speed_test(run, link_before):
     result = {
         "trigger": run.get("trigger"), "started": int(started), "secs": round(time.time() - started, 1),
         "down_mbps": down.get("mbps"), "up_mbps": up.get("mbps"),
-        "down_mb": down.get("mb"), "up_mb": up.get("mb"), "streams": streams,
+        "down_mb": down.get("mb"), "up_mb": up.get("mb"), "streams": streams, "down_source": down_source,
         "idle_ms": ms(idle.get("cloudflare")), "loaded_ms": ms(down["loaded"].get("cloudflare")),
         "loaded_up_ms": ms(up["loaded"].get("cloudflare")),
         "router_idle_ms": ms(idle.get("router")), "router_loaded_ms": ms(down["loaded"].get("router")),
@@ -428,8 +476,8 @@ def speed_test(run, link_before):
     }
     if errors:
         result["errors"] = sorted(set(errors))[:4]
-        if "down_mbps" not in result or result["down_mbps"] is None:
-            result["down_error"] = result["errors"][0]
+        if result["down_mbps"] is None:
+            result["down_error"] = "rate limited (HTTP 429)" if rate_limited else result["errors"][0]
     if result["up_mbps"] is None:
         result["up_error"] = next((e for e in errors if e.startswith("upload")), "no data")
     return result
@@ -501,12 +549,15 @@ def one_round(state):
     log(f"speed test requested ({run.get('trigger')}, id {run.get('id')}); {describe(body)}")
     signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(TimeoutError("test took too long")))
     signal.alarm(150)
+    cooldowns = {k: v for k, v in (state.get("cooldowns") or {}).items() if v > time.time()}
     try:
-        result = speed_test(run, body.get("link"))
+        result = speed_test(run, body.get("link"), cooldowns)
     except Exception as exc:            # report the failure to the Pi instead of leaving the request hanging
         result = {"trigger": run.get("trigger"), "started": int(time.time()), "down_error": type(exc).__name__}
     finally:
         signal.alarm(0)
+    state["cooldowns"] = cooldowns
+    save_state(state)
     try:
         reply = post("/api/laptop/result", {"id": run.get("id"), "result": result}, timeout=10)
     except (OSError, ValueError) as exc:

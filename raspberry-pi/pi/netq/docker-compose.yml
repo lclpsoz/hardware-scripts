@@ -21,7 +21,8 @@ services:
       NETQ_SPEED_EVERY_H: "6"     # 0 turns the scheduled speed test off
       NETQ_LAPTOP_SPEED_EVERY_MIN: "30"   # default for the laptop full-speed test; changeable on the page, 0 = off
       NETQ_LAPTOP_LIGHT_EVERY_MIN: "10"   # 3 s ping-only probe from the laptop
-      NETQ_LAPTOP_MAX_MB: "300"           # per direction: caps the data one test uses
+      NETQ_LAPTOP_MAX_MB: "200"           # per direction: caps the data one test uses
+      NETQ_LAPTOP_DOWN_SOURCE: "google"   # Cloudflare rate-limits big downloads by IP; "cloudflare" to use it first
     volumes:
       - ./netq.py:/app/netq.py:ro
       - ./data:/data

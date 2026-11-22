@@ -23,7 +23,7 @@ if asked:      laptop runs the test (about 20 s) ── POST /api/laptop/result 
 
 ## What a test measures
 
-- **Speed:** 4 parallel HTTPS streams to Cloudflare, 8 s down and 6 s up, rate taken from the steady part (after a 2 s warm-up). Each direction stops early at 300 MB (`NETQ_LAPTOP_MAX_MB`), so a test costs at most about 0.6 GB. **At the 30-minute default that is up to about 28 GB a day** on this line (the first live test moved about 0.5 GB). It also saturates the line for about 15 s every half hour, which the TV or a call would notice. If that matters, raise the interval on the page or lower `NETQ_LAPTOP_MAX_MB`.
+- **Speed:** 4 parallel HTTPS streams (download from Google's download servers, upload to Cloudflare), 8 s down and 6 s up, rate taken from the steady part (after a 2 s warm-up). Each direction stops early at the byte cap (`NETQ_LAPTOP_MAX_MB`, 300 on the Pi today; the laptop's own default is 200), so a test costs at most about 0.6 GB. **At the 30-minute default that is up to about 28 GB a day** on this line (the first live test moved about 0.5 GB). It also saturates the line for about 15 s every half hour, which the TV or a call would notice. If that matters, raise the interval on the page or lower `NETQ_LAPTOP_MAX_MB`.
 - **Latency under load**, to the router, the ISP gateway and Cloudflare: idle, during the download and during the upload, with jitter and loss. A router latency that jumps under load on Wi-Fi is the laptop-to-router link, not the ISP.
 - **The link:** Wi-Fi band, signal in dBm, link rate, retries and missed beacons during the test; or Ethernet speed, duplex and error counters. No SSID, MAC or address is sent.
 - **Other traffic**, to tell a bad line from a busy one:
@@ -37,6 +37,8 @@ if asked:      laptop runs the test (about 20 s) ── POST /api/laptop/result 
 - **Low-speed notification:** if a clean (not contended) test falls under half the median of the last clean ones (at least 4 needed, 7 days), one ntfy message says so with the link and latency, at most once every 3 hours.
 
 **qBittorrent detail.** Without the Web UI the probe only knows it is running and how much traffic the laptop moves in total, which already shows the effect. For exact rates, turn on Tools → Options → Web UI on 127.0.0.1:8080 and tick "Bypass authentication for clients on localhost" (no password is stored). Not changed by this work; it is your qBittorrent setting.
+
+**Why Google for the download (found 2026-11-22).** Cloudflare's speed endpoint rate-limits by IP address: after a few GB in a short time (my trials plus a series of back-to-back tests) it answered HTTP 429 with `Retry-After: 2769` (46 minutes) for every download, and it caps one request below 100 MB (100 MB gets a 403). The block is shared with the Pi's own 6-hourly test. Uploads to Cloudflare were not affected. So the laptop downloads from `dl.google.com` (a 150 MB file, fetched with `Range`, 538-563 Mbps here, no limit seen) and keeps Cloudflare for upload and as the fallback. On a 429 the laptop records a cooldown for that source from `Retry-After`, skips it until then, and says so in the test's notes. The result carries `down_source`.
 
 ## What the page shows
 
