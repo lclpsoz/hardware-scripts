@@ -94,7 +94,7 @@ The evidence:
   - 36,732 blocked by regex, all from the TV's deny-all rule;
   - **502** blocked by the list;
   - 8,458 forwarded upstream.
-- **Live test at 20:09:** `doubleclick.net` from this laptop (192.168.0.7) was forwarded to 8.8.4.4 and returned 142.250.219.142. The DNS runbook recorded `0.0.0.0` for the same test on 11 Nov at 01:3x.
+- **Live test at 20:09:** `doubleclick.net` from this laptop was forwarded to 8.8.4.4 and returned 142.250.219.142. The DNS runbook recorded `0.0.0.0` for the same test on 11 Nov at 01:3x.
 - **When it changed:** the TV group's deny-all regex was added at 02:39 that day. So the list was probably moved to the TV group, rather than added to it, while setting up the TV.
 
 **Fix (UI):** Lists page, StevenBlack row, Group assignment: tick **Default** as well as `YouTubeAndPrimeOnly`, then save. Check from the laptop: `dig @192.168.0.250 doubleclick.net +short` should print `0.0.0.0`.
@@ -201,7 +201,7 @@ Busiest minute per device over the last 3 days:
 
 | Device | Busiest minute | When | What it was |
 | --- | --- | --- | --- |
-| 192.168.0.7 (this laptop) | **1,097** | 20 Nov 20:22 | Ad-heavy pages right after blocking came back: 527 of those queries were blocked, and blocked queries count too |
+| This laptop | **1,097** | 20 Nov 20:22 | Ad-heavy pages right after blocking came back: 527 of those queries were blocked, and blocked queries count too |
 | 192.168.0.1 (router, all IPv6-DNS devices) | 953 and 721 | 18 Nov 12:25 and 20 Nov 20:17 | Several devices added together |
 | 192.168.0.9 (work laptop) | 818 | 19 Nov 09:24 | Ad-heavy page loads, on top of a work API name it asks for about 180 times a minute |
 

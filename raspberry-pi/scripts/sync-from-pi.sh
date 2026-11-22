@@ -16,6 +16,7 @@ redact() {
   # true/false flags (for example SETPWD_enable_password=False), which are safe.
   sed -E \
     -e '/^[^=:]*[:=][[:space:]]*"?(true|false)"?[[:space:]]*$/I!s/^([[:space:]]*-?[[:space:]]*"?[A-Za-z0-9_.]*(PASSWORD|PASSWD|PASS|TOKEN|SECRET|PWHASH|TOTP|EMAIL|KEY|TOPIC)[A-Za-z0-9_.]*"?[[:space:]]*[:=][[:space:]]*).+$/\1"<redacted>"/I' \
+    -e 's/[0-9.]+ jellyfin\.lan/<laptop address> jellyfin.lan/g' \
     -e 's/PARTUUID=[0-9a-fA-F-]+/PARTUUID=<redacted>/g' \
     -e 's/ds=nocloud;i=[^ ]+/ds=nocloud;i=<redacted>/g' \
     -e 's/\b([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}\b/xx:xx:xx:xx:xx:xx/g'

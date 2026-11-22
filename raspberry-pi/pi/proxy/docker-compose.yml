@@ -19,7 +19,6 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./www:/srv/home:ro
-      - ./jellyfin-upstream.conf:/etc/nginx/jellyfin-upstream.conf:ro
     tmpfs:
       - /tmp
       - /var/cache/nginx

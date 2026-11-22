@@ -13,7 +13,7 @@ Set up 2026-11-20. Every service on the Pi now has a short name. Open **http://h
 | [ntfy.lan](http://ntfy.lan) | Push notifications server ([11-notifications.md](11-notifications.md)) | 2586, localhost only |
 | [steps.lan](http://steps.lan) | Sitting reminders: timer, snooze, daily stats and settings ([12-sedentary-reminders.md](12-sedentary-reminders.md)) | 8097, LAN |
 | [focus.lan](http://focus.lan) | Open a blocked site on the work laptop for a few minutes ([15-focus-blocking.md](15-focus-blocking.md)) | 8095, LAN |
-| [jellyfin.lan](http://jellyfin.lan) | Jellyfin media server, which runs on the main laptop, not the Pi; the proxy forwards to it (laptop address in `~/proxy/jellyfin-upstream.conf`, not in the repo; example next to `nginx.conf`). Shows the Jellyfin icon on home.lan. Dead (502) when the laptop or the container is off | 8096 on the laptop |
+| [jellyfin.lan:8096](http://jellyfin.lan:8096) | Jellyfin media server. It runs on the main laptop, not the Pi: Pi-hole only gives the name (a DNS record pointing at the laptop), so video goes straight from the laptop to the player and never through the Pi. Needs the port in the address. Shows the Jellyfin icon on home.lan. Dead when the laptop or the container is off | 8096 on the laptop |
 | `router.lan` | The ISP router (192.168.0.1) | 80 on the router |
 
 Old addresses keep working: `http://192.168.0.250/admin` and `http://pi.hole/admin` still reach Pi-hole.
@@ -49,6 +49,21 @@ cd ~/proxy && docker compose down                      # frees port 80
 cd ~/pihole && cp docker-compose.yml.bak-2026-11-20 docker-compose.yml && docker compose up -d   # Pi-hole back on 80/443
 docker exec pihole pihole-FTL --config dns.hosts '[]'  # remove the names
 ```
+
+## Fixed address for the laptop (needed for jellyfin.lan)
+
+`jellyfin.lan` is a Pi-hole record pointing at the laptop, so the laptop must always have the same address. If your router cannot reserve addresses (check its DHCP pages), set a static one on the laptop, outside the router's DHCP pool so it never collides with a lease.
+
+1. Pick an address outside the pool, on the same subnet.
+2. On the laptop, per connection profile (find names with `nmcli con show`): `nmcli con mod "<profile>" ipv4.method manual ipv4.addresses <ADDRESS>/24 ipv4.gateway <ROUTER> ipv4.dns <PI> && nmcli con up "<profile>"`. Do it for the Wi-Fi and the Ethernet profile.
+3. Put the address in Pi-hole's `dns.hosts` for `jellyfin.lan` (`docker exec pihole pihole-FTL --config dns.hosts ...`). The repo mirror shows `<laptop address>` instead of the real one.
+4. Undo: `nmcli con mod "<profile>" ipv4.method auto ipv4.addresses "" ipv4.gateway "" ipv4.dns "" && nmcli con up "<profile>"`.
+
+Notes:
+- The setting belongs to the profile, so any Ethernet port on the same router works.
+- With the same address on Wi-Fi and Ethernet, use only one at a time: two interfaces claiming one address cause drops. Turn Wi-Fi off when the cable is in, or give each its own address.
+- The speed checks and backups are not affected: the laptop only calls out to the Pi.
+- NetAlertX shows the laptop as a new device at its new address, and Pi-hole statistics split between the old and new address.
 
 ## HTTPS for the `.lan` names
 
