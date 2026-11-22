@@ -30,6 +30,7 @@ Endpoints (token in header X-Token or ?t=):
   GET  /phone.sh              the Termux loop script (no token)
   POST /api/settings          JSON body with any settings, validated
   POST /api/test              {"type": "level2"|"moved"|...} send that notification
+  GET  /api/battery?hours=168 street phone battery [time, percent, charging] per upload (kept in /data/battery.jsonl, 14 days)
   GET  /api/pings?hours=3     ping results of the last 1-168 h (kept in /data/pings.jsonl, so a restart keeps them)
   POST /api/debug/steps       {"n": N} fake report with the counter raised by N (hollow dot)
   POST /api/debug/sitting     {"min": M} pretend you have been sitting M minutes
@@ -64,6 +65,7 @@ PHONE_FILE = E("PHONE_FILE", "/app/phone.sh")
 STREET_FILE = E("STREET_FILE", "/app/street.sh")
 KEEP_DAYS = 365
 KEEP_REPORTS_H = 24
+KEEP_BATT_H = 336           # street phone battery history: two weeks, about 96 lines a day
 KEEP_PINGS_H = 168          # a week of pings: about 1,440 lines (60 KB) a day
 ARP_FILE = E("ARP_FILE", "/proc/net/arp")
 
@@ -146,6 +148,7 @@ stats = {}            # "YYYY-MM-DD" -> day record
 stats_dirty = False
 reports = deque()     # [unix time, counter value(, 1 if added by hand)] of every phone report, last 24 h
 pings = deque()       # [unix time, 1 if the phone answered else 0, round-trip ms or None, address tried] every presence ping, last 7 days
+battery_log = deque()   # [unix time, percent, 1 if charging] of every upload from the street phone, last 14 days
 pings_appended = 0    # lines appended to pings.jsonl since it was last rewritten
 appended = 0          # lines appended to reports.jsonl since it was last rewritten compactly
 
@@ -315,6 +318,17 @@ def load():
     sj = read_json("street.json")
     if isinstance(sj, dict) and isinstance(sj.get("last_n"), int):
         S["street"].update({k: sj[k] for k in ("last_t", "last_n", "uploaded_at", "battery", "plugged") if k in sj})
+    try:
+        with open(os.path.join(DATA, "battery.jsonl")) as f:
+            for line in f:
+                try:
+                    x = json.loads(line)
+                    if isinstance(x, list) and len(x) == 3 and x[0] >= time.time() - KEEP_BATT_H * 3600:
+                        battery_log.append(x)
+                except ValueError:
+                    pass
+    except OSError:
+        pass
     st = read_json("stats.json")
     if isinstance(st, dict):
         stats.update(st)
@@ -779,12 +793,32 @@ def street_battery(pct, plugged, t):
     st = S["street"]
     st["battery"], st["plugged"] = pct, plugged
     write_json("street.json", st)
+    save_battery([int(t), pct, int(bool(plugged))], t)
     gap = SET["notif"]["battery"]["repeat_s"]
     if (pct <= SET["battery_warn_pct"] and not plugged and SET["enabled"] and not in_quiet(t)
             and t - S["batt_told"] >= gap):
         S["batt_told"] = t
         send("battery", battery=pct)
         log("street phone battery", pct, "%: warned")
+
+
+def save_battery(rec, t):
+    """Keep the battery history in battery.jsonl (one line per upload; rewritten when old lines are dropped)."""
+    battery_log.append(rec)
+    old = battery_log and battery_log[0][0] < t - KEEP_BATT_H * 3600
+    while battery_log and battery_log[0][0] < t - KEEP_BATT_H * 3600:
+        battery_log.popleft()
+    path = os.path.join(DATA, "battery.jsonl")
+    try:
+        if old:
+            with open(path + ".tmp", "w") as f:
+                f.writelines(json.dumps(x) + "\n" for x in battery_log)
+            os.replace(path + ".tmp", path)
+        else:
+            with open(path, "a") as f:
+                f.write(json.dumps(rec) + "\n")
+    except OSError as e:
+        log("battery not saved:", e)
 
 
 def add_sample(n, manual=False):
@@ -1093,6 +1127,12 @@ class H(BaseHTTPRequestHandler):
                     k = len(rows) // 900 + 1
                     rows = [x for i, x in enumerate(rows) if not x[1] or i % k == 0 or i == len(rows) - 1]
                 return self.reply(200, {"now": int(t), "hours": h, "pings": rows})
+            if u.path == "/api/battery":
+                h = max(1, min(KEEP_BATT_H, int((q.get("hours") or [168])[0])))
+                t = time.time()
+                with lock:
+                    rows = [x for x in battery_log if x[0] >= t - h * 3600]
+                return self.reply(200, {"now": int(t), "hours": h, "warn": SET["battery_warn_pct"], "battery": rows})
             if u.path == "/api/settings" and self.command == "POST":
                 ok, err = validate(self.body_json())
                 if err:

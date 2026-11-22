@@ -279,6 +279,13 @@
       <p class="hint">At the phone's next report (needs the Clock app package set above). Timers are also dismissed automatically when you walk enough, press a snooze, or before a new one starts.</p>
       <div id="dbgMsg" class="hint"></div>
     </details>
+
+    <h2>Street phone battery</h2>
+    <div class="card">
+      <svg id="battChart" viewBox="0 0 480 130" width="100%" role="img" aria-label="Street phone battery over the last 7 days"></svg>
+      <div class="legend"><span><i class="sw" style="background:var(--accent)"></i>on battery</span><span><i class="sw" style="background:var(--ok)"></i>charging</span><span><i class="sw" style="background:var(--warn)"></i>warning level</span></div>
+      <div class="hint" id="battNote"></div>
+    </div>
   </div>
 </main>
 <script>
@@ -613,8 +620,27 @@ function drawReports(j) {
     body.appendChild(tr);
   });
 }
+function drawBattery(j) {
+  const svg = $('battChart'), s = j.battery, t1 = j.now, t0 = t1 - j.hours * 3600;
+  const g = { L: 36, R: 474, T: 14, B: 108 }, span = t1 - t0;
+  const X = t => g.L + (t - t0) / span * (g.R - g.L), Y = v => g.B - v / 100 * (g.B - g.T);
+  svg.textContent = '';
+  [0, 25, 50, 75, 100].forEach(v => { el('line', { class: 'grid', x1: g.L, x2: g.R, y1: Y(v), y2: Y(v) }, svg); el('text', { x: g.L - 4, y: Y(v) + 3, 'text-anchor': 'end' }, svg, v + '%'); });
+  const day = new Date(t0 * 1000); day.setHours(24, 0, 0, 0);
+  for (let t = day.getTime() / 1000; t <= t1; t += 86400) { el('line', { class: 'grid', x1: X(t), x2: X(t), y1: g.B, y2: g.B + 3 }, svg); el('text', { x: X(t), y: g.B + 14, 'text-anchor': 'middle' }, svg, new Date(t * 1000).toLocaleDateString([], { weekday: 'short' })); }
+  el('line', { class: 'thr', x1: g.L, x2: g.R, y1: Y(j.warn), y2: Y(j.warn) }, svg);
+  el('text', { class: 'warn', x: g.R, y: Y(j.warn) - 3, 'text-anchor': 'end' }, svg, 'warning: ' + j.warn + '%');
+  let seg = [];
+  const flush = () => { if (seg.length > 1) el('polyline', { class: 'ln', points: seg.map(x => X(x[0]).toFixed(1) + ',' + Y(x[1]).toFixed(1)).join(' ') }, svg); seg = []; };
+  s.forEach((x, i) => { if (i && x[0] - s[i - 1][0] > 2400) flush(); seg.push(x); });   // no line across the hours the phone was out
+  flush();
+  s.forEach(x => { const c = el('circle', { class: x[2] ? 'pok' : 'dt', cx: X(x[0]), cy: Y(x[1]), r: s.length > 300 ? 1.5 : 2.4 }, svg); el('title', {}, c, new Date(x[0] * 1000).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }) + ' · ' + x[1] + '%' + (x[2] ? ' (charging)' : '')); });
+  if (!s.length) el('text', { x: 240, y: 65, 'text-anchor': 'middle' }, svg, 'no battery readings yet (the phone sends one with each upload at home)');
+  const l = s[s.length - 1];
+  $('battNote').textContent = l ? 'Last reading ' + l[1] + '%' + (l[2] ? ' (charging)' : '') + ', ' + fmtAge(Math.round(Date.now() / 1000 - l[0])) + '. Readings only arrive while the phone is on the home Wi-Fi; the line breaks while it is out.' : '';
+}
 async function loadSamples() {
-  try { GAP_MIN = Math.max(6, 3 * (settings.report_idle_s || 60) / 60); const j = await api('/api/samples?hours=' + range); drawRate(j); drawReports(j); drawPings(await api('/api/pings?hours=' + range)); } catch (e) { if (e.message !== 'token') msg('Cannot load reports: ' + e.message, 'err'); }
+  try { GAP_MIN = Math.max(6, 3 * (settings.report_idle_s || 60) / 60); const j = await api('/api/samples?hours=' + range); drawRate(j); drawReports(j); drawPings(await api('/api/pings?hours=' + range)); drawBattery(await api('/api/battery?hours=168')); } catch (e) { if (e.message !== 'token') msg('Cannot load reports: ' + e.message, 'err'); }
 }
 document.querySelectorAll('#rng button').forEach(b => b.onclick = () => {
   range = Number(b.dataset.h);
