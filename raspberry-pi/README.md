@@ -113,13 +113,13 @@ The backup now runs by itself every day from the laptop ([laptop/README.md](lapt
 
 | File | Restores |
 | --- | --- |
-| `pi-home.tar.gz` | `~/pihole`, `~/netalertx`, `~/proxy`, `~/netq`, the Beszel compose file; Pi-hole databases as consistent snapshots in `etc-pihole/.bk/` |
+| `pi-home.tar.zst` (older backups: `.tar.gz`) | `~/pihole`, `~/netalertx`, `~/proxy`, `~/netq`, the Beszel compose file; in a **full** backup, the Pi-hole databases as consistent snapshots in `etc-pihole/.bk/` (a **light** backup leaves them out) |
 | `beszel.tar.gz` | Beszel hub data and keys |
 | `netalertx-volume.tar.gz` | NetAlertX devices and settings (docker volume) |
 | `pihole-teleporter.zip` | Pi-hole settings, lists, local DNS (upload in Settings → Teleporter) |
 | `pi-system.tar.gz` | systemd units, uv scripts, boot config, journald config |
 
-To restore a service: extract its archive into `~`, move the `.bk` snapshots over `gravity.db` and `pihole-FTL.db`, then `docker compose up -d`. For the NetAlertX volume, extract into the docker volume with `docker run --rm -v netalertx_netalertx_data:/data -i python:3.13-alpine tar xzf - -C /data < netalertx-volume.tar.gz`. It does not cover the operating system itself; for that, image the SD card.
+A full backup is made when no backup in the folder has a `FULL` marker from the last 7 days, so about once a week; the other days are light (3 MB instead of 46 MB), see [01-undervoltage.md](01-undervoltage.md#update-22-nov-the-last-24-hours). To restore a service: extract its archive into `~` (`tar --zstd -xf pi-home.tar.zst -C ~`, or `tar xzf` for an old `.tar.gz`). For Pi-hole, take the newest backup folder that has a `FULL` file, move its `.bk` snapshots over `gravity.db` and `pihole-FTL.db`, then `docker compose up -d`. If you only have a light backup, import `pihole-teleporter.zip` and run `pihole -g` to rebuild the lists. The query history is then missing. For the NetAlertX volume, extract into the docker volume with `docker run --rm -v netalertx_netalertx_data:/data -i python:3.13-alpine tar xzf - -C /data < netalertx-volume.tar.gz`. It does not cover the operating system itself; for that, image the SD card.
 
 ## Keeping this folder in sync with the Pi
 

@@ -15,6 +15,7 @@ Wi-Fi off is a special case: keep it off regardless of power, because the router
 | NetAlertX schedules: ARP scan every 10 min, internet check every 15 min, cleanup at 15 min past every 3rd hour; four naming plugins off | NetAlertX settings (`app.conf`) | Active | CPU load | Device names come only from the ARP scan, and presence updates are slower | Optional. These are reasonable values for a Pi 3B anyway |
 | `dpkg-db-backup` limited to 20% CPU at `Nice=19` | `/etc/systemd/system/dpkg-db-backup.service.d/limit.conf` | Active | The midnight event | The job takes a few seconds longer | Any time; it is harmless either way |
 | Pi-hole and NetAlertX healthchecks every 5 min (image default: 30 s) | `healthcheck: interval: 5m` in `~/pihole/` and `~/netalertx/docker-compose.yml` (22 Nov) | Active | Each check is a `docker exec`, a burst of 1-2 cores for about a second, right before some events | A dead container is noticed up to 15 min later by Docker (the `alerts` container still probes the services every minute); "starting" for 5 min after a recreate | Third, after the NetAlertX limit. Delete the block in both files and `docker compose up -d` |
+| Light daily backup, rate limit 2 MB/s and `zstd` on the Pi (22 Nov) | `scripts/backup-pi.sh`, `scripts/throttle.py` on the laptop; knobs `BACKUP_FULL_EVERY_DAYS`, `BACKUP_RATE_KB` | Active: full backup about weekly, light on the other days | The 21 Nov and 22 Nov backups caused events (gzip at 90-100% of a core for about 90 s) | Pi-hole query history is only as fresh as the last full backup (up to 7 days); the weekly full run takes about a minute | Fourth, with the healthchecks. `export BACKUP_FULL_EVERY_DAYS=0` and `export BACKUP_RATE_KB=0` in `~/.config/pi-ops/config` |
 | cgroup memory accounting (`cgroup_enable=memory cgroup_memory=1`) | `/boot/firmware/cmdline.txt` | Active | Beszel per-container memory | Not a limit | Keep |
 
 Items from the earlier docs that are **not** in effect:
@@ -37,6 +38,7 @@ Items from the earlier docs that are **not** in effect:
    Run the step test again: it must pass at up to 1200 MHz. Then watch for a day, with zero events as the target. Only after that, `sudo rm /etc/systemd/system/cpupower-powersave.service && sudo systemctl daemon-reload`.
 4. Raise the NetAlertX limit to `cpus: "1.0"` with `docker compose up -d` in `~/netalertx`. Watch for a day.
 5. Put the healthchecks back to the image default (30 s): delete the `healthcheck:` block, with its comment, from `~/pihole/docker-compose.yml` and `~/netalertx/docker-compose.yml`, then `docker compose up -d` in each directory (short DNS gap for Pi-hole). Check `journalctl -k | grep Undervoltage` for a day.
-6. Optionally remove the dpkg quota: `sudo rm -r /etc/systemd/system/dpkg-db-backup.service.d && sudo systemctl daemon-reload`.
+6. Make the backup full and unthrottled again (laptop, no root): add `export BACKUP_FULL_EVERY_DAYS=0` and `export BACKUP_RATE_KB=0` to `~/.config/pi-ops/config`. Check the event count at backup time for a few days.
+7. Optionally remove the dpkg quota: `sudo rm -r /etc/systemd/system/dpkg-db-backup.service.d && sudo systemctl daemon-reload`.
 
 If an event comes back at any step, undo that step and treat the supply path as still marginal.

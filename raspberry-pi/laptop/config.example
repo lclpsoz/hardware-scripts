@@ -4,6 +4,9 @@ NTFY_TOPIC=change-me-to-a-long-random-string
 # PI_HOST=pi
 # BACKUP_DIR=$HOME/backups/rasp-al-gaib-lite
 # BACKUP_KEEP=14
+# Backup load on the Pi (see scripts/backup-pi.sh and 01-undervoltage.md). Use `export` so the script sees them.
+# export BACKUP_RATE_KB=2048            KB/s taken from the Pi, 0 = no limit
+# export BACKUP_FULL_EVERY_DAYS=7       full backup (with the Pi-hole databases) this often; 0 = every time
 # Speed test the Pi asks this laptop to run (must equal NETQ_LAPTOP_TOKEN in ~/netq/config.env on the Pi)
 NETQ_TOKEN=change-me-to-a-long-random-string
 # NETQ_URL=http://net.lan

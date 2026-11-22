@@ -20,7 +20,7 @@ What is still open on the Pi and the laptop-side services, in priority order. Up
 
 | Item | Waiting for | Then |
 | --- | --- | --- |
-| New power supply | It arriving | **Remove the apt limit** (`sudo bash ~/apply-apt-limit-and-uvweb.sh --undo`) after the load test passes. Reboot, run [the step load test](scripts/uv-step-load-test.sh), then lift limits in order: CPU governor, NetAlertX `cpus` 1.0, the 5 min healthchecks (back to 30 s; 22 Nov), dpkg quota ([04](04-resource-limits.md)). Then the 4 pending package upgrades. |
+| New power supply | It arriving | **Remove the apt limit** (`sudo bash ~/apply-apt-limit-and-uvweb.sh --undo`) after the load test passes. Reboot, run [the step load test](scripts/uv-step-load-test.sh), then lift limits in order: CPU governor, NetAlertX `cpus` 1.0, the 5 min healthchecks (back to 30 s; 22 Nov), the light and throttled backup (22 Nov), dpkg quota ([04](04-resource-limits.md)). Then the 4 pending package upgrades. |
 | Flight recorder | The next undervoltage event | It notifies you; read `/var/log/uv-flight/events.jsonl` for the minute before ([01](01-undervoltage.md)) |
 | Blocklist experiments (HaGeZi Pro is on) | Owner's feedback on broken sites | Allow the names that break; check `*.on.aws` and BetterStack from the work laptop |
 | Pi-hole limits (rate limit 1000/min, 150 concurrent) | About a week with the new list, around 2026-11-27 | Pi-hole now notifies you when the limit is hit. Compare with the netq charts; if still hit, raise to 5000 and 512 ([02](02-pihole.md#8-can-the-limits-go-up-follow-up-2026-11-20-evening)) |
