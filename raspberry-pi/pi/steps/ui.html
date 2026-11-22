@@ -8,11 +8,11 @@
 <style>
   :root {
     --bg: #f6f6f4; --card: #ffffff; --text: #1d1d1b; --muted: #6b6b66;
-    --line: #e2e2dc; --accent: #c2185b; --ok: #2e7d32; --bad: #c62828; --warn: #ef6c00; --wait: #9e9e99;
+    --line: #e2e2dc; --accent: #c2185b; --ok: #2e7d32; --bad: #c62828; --warn: #ef6c00; --wait: #9e9e99; --away: #3949ab; --awaybg: #e8eaf6;
   }
   @media (prefers-color-scheme: dark) {
     :root { --bg: #151514; --card: #1f1f1d; --text: #ecece8; --muted: #a3a39c;
-            --line: #33332f; --accent: #f06292; --ok: #66bb6a; --bad: #ef5350; --warn: #ffa726; --wait: #77776f; }
+            --line: #33332f; --accent: #f06292; --ok: #66bb6a; --bad: #ef5350; --warn: #ffa726; --wait: #77776f; --away: #9fa8da; --awaybg: #232640; }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
@@ -33,7 +33,17 @@
           border: 1px solid var(--line); color: var(--muted); }
   .pill.watching { color: var(--ok); border-color: var(--ok); }
   .pill.snoozed, .pill.quiet { color: var(--accent); border-color: var(--accent); }
+  .pill.away { color: var(--away); border-color: var(--away); background: var(--awaybg); font-weight: 600; }
   .pill.no-data, .pill.off { color: var(--warn); border-color: var(--warn); }
+  .away-banner { display: flex; gap: 12px; align-items: center; margin: 0 0 14px; padding: 12px 14px; border-radius: 10px;
+                 background: var(--awaybg); border: 1px solid var(--away); border-left-width: 6px; color: var(--text); }
+  .away-banner .ic { font-size: 28px; line-height: 1; }
+  .away-banner b { color: var(--away); }
+  .card.paused .big, .card.paused .bar { opacity: .45; filter: grayscale(.7); }
+  .dev { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; }
+  .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: var(--wait); margin-right: 6px; vertical-align: -1px; }
+  .dot.home { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 22%, transparent); }
+  .dot.away { background: var(--away); }
   .bar { position: relative; height: 12px; background: var(--line); border-radius: 6px; margin: 18px 0 30px; }
   .fill { position: absolute; inset: 0 auto 0 0; border-radius: 6px; background: var(--ok); transition: width .5s; }
   .mark { position: absolute; top: -4px; width: 2px; height: 20px; background: var(--muted); }
@@ -66,6 +76,8 @@
   svg .ln { stroke: var(--accent); fill: none; stroke-width: 1.5; stroke-linejoin: round; }
   svg .dt { fill: var(--accent); }
   svg .man { fill: var(--card); stroke: var(--accent); stroke-width: 1.4; }
+  svg .pok { fill: var(--ok); }
+  svg .pmiss { fill: var(--away); opacity: .22; }
   svg .hi { fill: var(--ok); }
   svg .lo { fill: var(--accent); opacity: .75; }
   svg text.warn { fill: var(--warn); paint-order: stroke; stroke: var(--card); stroke-width: 3px; }
@@ -112,7 +124,12 @@
   </div>
 
   <div id="app" class="hidden">
-    <div class="card">
+    <div class="card" id="heroCard">
+      <div id="awayBanner" class="away-banner hidden">
+        <div class="ic">🚪</div>
+        <div><b id="awayTitle">Away from home: timer paused</b>
+          <div class="hint" id="awayText" style="margin:2px 0 0"></div></div>
+      </div>
       <div class="hero">
         <div><div class="big"><span id="sit">0</span> min</div><div class="hint">sitting (no 200 steps in 5 min)</div></div>
         <span id="mode" class="pill">…</span>
@@ -122,6 +139,23 @@
       <div class="hint" id="legend" style="margin:-4px 0 12px"></div>
       <div class="row" id="snz"></div>
       <div id="snzNote" class="hint"></div>
+    </div>
+
+    <h2>Phone at home</h2>
+    <div class="card">
+      <div class="dev">
+        <span style="font-size:18px;font-weight:600"><i class="dot" id="pDot"></i><span id="pName">phone</span></span>
+        <span class="pill" id="pPill">…</span>
+        <span class="hint" id="pLine" style="margin:0"></span>
+      </div>
+      <svg id="pingChart" viewBox="0 0 480 110" width="100%" role="img" aria-label="Ping results for the phone over time" style="margin-top:10px"></svg>
+      <div class="legend"><span><i class="sw" style="background:var(--ok)"></i>ping answered (height = round trip, ms)</span><span><i class="sw" style="background:var(--away);opacity:.3"></i>no answer</span></div>
+      <div class="hint" id="pNote"></div>
+      <div class="hint" id="pSteps"></div>
+      <div class="scroll" style="margin-top:8px"><table>
+        <thead><tr><th>Time</th><th>Result</th><th class="n">Round trip</th><th>Address</th></tr></thead>
+        <tbody id="pRecent"></tbody>
+      </table></div>
     </div>
 
     <h2>Today</h2>
@@ -179,6 +213,15 @@
         <label class="f">Steps that count as moving<input type="number" id="s_move_steps" min="10" max="5000"></label>
         <label class="f">…within (minutes)<input type="number" id="s_move_window_min" min="1" max="60"></label>
         <label class="f">Phone silent after (min)<input type="number" id="s_stale_min" min="5" max="240"></label>
+      </div>
+      <p class="hint" style="margin-top:14px"><b>Phone at home.</b> The Pi pings the phone (found by its Wi-Fi address, since the IP changes). If it neither answers nor reports for a while, you are away and the sitting timer is paused until it is back. Keep the phone's Wi-Fi on.</p>
+      <div class="orow"><label class="check"><input type="checkbox" id="s_presence_enabled"> Pause the timer when the phone is not home</label></div>
+      <div class="form" style="margin-top:8px">
+        <label class="f">Device name<input type="text" id="s_presence_name" maxlength="40" style="width:100%"></label>
+        <label class="f">Wi-Fi (MAC) address<input type="text" id="s_presence_mac" maxlength="17" style="width:100%" placeholder="aa:bb:cc:dd:ee:ff"></label>
+        <label class="f">Address to try first (optional)<input type="text" id="s_presence_ip" maxlength="15" style="width:100%" placeholder="192.168.0.6"></label>
+        <label class="f">Ping every (s)<input type="number" id="s_presence_every_s" min="10" max="300"></label>
+        <label class="f">Away after no sign for (min)<input type="number" id="s_presence_away_min" min="1" max="240"></label>
       </div>
       <p class="hint" style="margin-top:14px">Snooze buttons: minutes, and the sitting time under which each is offered (0 = always). A notification shows up to 3 snooze buttons (the longest offered at that moment); this page shows all of them.</p>
       <div id="snzOpts"></div>
@@ -255,7 +298,7 @@ function showLogin() {
   clearInterval(timer); timer = null;
 }
 function fmtAge(s) { return s == null ? '–' : s < 90 ? s + ' s ago' : Math.round(s / 60) + ' min ago'; }
-const MODES = { watching: 'watching', snoozed: 'snoozed', quiet: 'quiet hours', 'no-data': 'no phone data', off: 'reminders off' };
+const MODES = { watching: 'watching', away: 'away · paused', snoozed: 'snoozed', quiet: 'quiet hours', 'no-data': 'no phone data', off: 'reminders off' };
 
 const NOTIF_META = [
   ['level1', 'Level 1 · light', true], ['level2', 'Level 2 · mid', true], ['level3', 'Level 3 · high', true], ['level4', 'Level 4 · constant', true],
@@ -300,6 +343,8 @@ function fillForm(s) {
   s.levels_min.forEach((v, i) => $('l' + i).value = v);
   $('s_move_steps').value = s.move_steps;
   $('s_move_window_min').value = Math.round(s.move_window_s / 60); $('s_stale_min').value = s.stale_min;
+  $('s_presence_enabled').checked = s.presence_enabled; $('s_presence_name').value = s.presence_name; $('s_presence_mac').value = s.presence_mac; $('s_presence_ip').value = s.presence_ip;
+  $('s_presence_every_s').value = s.presence_every_s; $('s_presence_away_min').value = s.presence_away_min;
   $('s_phone_alarm').checked = s.phone_alarm; $('s_alarm_package').value = s.alarm_package; $('s_alarm_ring_s').value = s.alarm_ring_s; $('s_loud_limit_min').value = s.loud_limit_min; $('s_backoff_max_s').value = s.backoff_max_s; $('s_notif_backoff_max_s').value = s.notif_backoff_max_s;
   for (let i = 0; i < 4; i++) { const o = s.snooze_opts[i]; $('o' + i + 'm').value = o ? o[0] : ''; $('o' + i + 'b').value = o ? o[1] : ''; }
   $('s_report_idle_s').value = s.report_idle_s; $('s_report_walk_s').value = s.report_walk_s; $('s_walk_spm').value = s.walk_spm;
@@ -331,6 +376,8 @@ function readForm() {
     levels_min: [0, 1, 2, 3].map(i => Number($('l' + i).value)),
     move_steps: Number($('s_move_steps').value),
     move_window_s: Number($('s_move_window_min').value) * 60, stale_min: Number($('s_stale_min').value),
+    presence_enabled: $('s_presence_enabled').checked, presence_name: $('s_presence_name').value, presence_mac: $('s_presence_mac').value,
+    presence_ip: $('s_presence_ip').value, presence_every_s: Number($('s_presence_every_s').value), presence_away_min: Number($('s_presence_away_min').value),
     phone_alarm: $('s_phone_alarm').checked, alarm_package: $('s_alarm_package').value, alarm_ring_s: Number($('s_alarm_ring_s').value), loud_limit_min: Number($('s_loud_limit_min').value), backoff_max_s: Number($('s_backoff_max_s').value), notif_backoff_max_s: Number($('s_notif_backoff_max_s').value), snooze_opts: opts,
     report_idle_s: Number($('s_report_idle_s').value), report_walk_s: Number($('s_report_walk_s').value), walk_spm: Number($('s_walk_spm').value),
     quiet_enabled: $('s_quiet_enabled').checked, quiet_start: $('s_quiet_start').value, quiet_end: $('s_quiet_end').value,
@@ -362,6 +409,14 @@ function render(d) {
   const pct = Math.min(100, st.sitting_min / max * 100);
   $('fill').style.width = pct + '%';
   $('fill').style.background = st.level >= 3 ? 'var(--bad)' : st.level >= 1 ? 'var(--warn)' : 'var(--ok)';
+  const pr = st.presence || {}, away = st.mode === 'away';
+  $('heroCard').classList.toggle('paused', away);
+  $('awayBanner').classList.toggle('hidden', !away);
+  if (away) {
+    $('awayTitle').textContent = 'Away from home: the sitting timer is paused';
+    $('awayText').textContent = pr.name + ' has not been seen on the home network for ' + fmtDur(pr.away_for_min) + ' (no ping answer). The timer is frozen at ' + Math.floor(st.sitting_min) + ' min and carries on when the phone is back. No reminders until then.';
+  }
+  renderPresence(pr);
   const next = lv.find(v => v > st.sitting_min);
   $('next').textContent = st.mode !== 'watching' ? '' : next ? 'next reminder in ' + Math.ceil(next - st.sitting_min) + ' min' : 'constant reminders until you walk';
 
@@ -396,6 +451,48 @@ function render(d) {
     c(x.date.slice(5)); c(x.steps.toLocaleString(), 'n');
     const bt = c('', 'bt'); const bar = document.createElement('div'); bar.className = 'mini'; bar.style.width = (x.steps / hmax * 100) + '%'; bt.appendChild(bar);
     c(x.reminders.reduce((a, b) => a + b, 0), 'n'); c(Math.round(x.longest_min) + ' min', 'n'); c(Object.values(x.snoozes).reduce((a, b) => a + b, 0), 'n');
+    body.appendChild(tr);
+  });
+}
+
+function fmtDur(m) { return m < 90 ? Math.round(m) + ' min' : (m / 60).toFixed(1).replace(/\.0$/, '') + ' h'; }
+function renderPresence(p) {
+  $('pName').textContent = p.name || 'phone';
+  const st = p.state || 'off';
+  $('pDot').className = 'dot ' + st;
+  const pill = $('pPill'); pill.textContent = st === 'home' ? 'home' : st === 'away' ? 'not home' : 'check off'; pill.className = 'pill ' + (st === 'home' ? 'watching' : st === 'away' ? 'away' : 'off');
+  const lp = p.last_ping, bits = [];
+  if (p.ip) bits.push(p.ip);
+  if (p.mac) bits.push(p.mac);
+  if (lp) bits.push('last ping ' + fmtAge(Math.round(Date.now() / 1000 - lp[0])) + (lp[1] ? ' answered in ' + lp[2] + ' ms' : ' got no answer'));
+  $('pLine').textContent = bits.join(' · ');
+  const sp = p.street || {};
+  $('pSteps').textContent = sp.upload_age_s == null ? 'Steps from this phone: none uploaded yet.' : 'Steps from this phone today: ' + (sp.steps_today || 0).toLocaleString() + ' · last upload ' + fmtAge(sp.upload_age_s) + ' (it sends its steps when it is back on the home Wi-Fi).';
+  $('pNote').textContent = !p.enabled ? 'Presence check is off in the settings.' :
+    (p.n_1h ? p.ok_1h + ' of ' + p.n_1h + ' pings answered in the last hour. ' : '') +
+    (st === 'away' ? 'Not seen for ' + fmtDur((p.seen_age_s || 0) / 60) + '.' : 'Seen ' + fmtAge(p.seen_age_s) + ' (a ping answer); away after ' + p.away_min + ' min without one.');
+}
+function drawPings(j) {
+  const svg = $('pingChart'), s = j.pings, t1 = j.now, t0 = t1 - j.hours * 3600;
+  const g = { L: 36, R: 474, T: 14, B: 90 }, span = t1 - t0;
+  const rtts = s.filter(x => x[1]).map(x => x[2]);
+  const ymax = niceMax(Math.max(20, ...rtts) * 1.1);
+  const X = t => g.L + (t - t0) / span * (g.R - g.L), Y = v => g.B - Math.min(v, ymax) / ymax * (g.B - g.T);
+  svg.textContent = '';
+  [0, 0.5, 1].forEach(f => { el('line', { class: 'grid', x1: g.L, x2: g.R, y1: Y(ymax * f), y2: Y(ymax * f) }, svg); el('text', { x: g.L - 4, y: Y(ymax * f) + 3, 'text-anchor': 'end' }, svg, Math.round(ymax * f)); });
+  const step = j.hours <= 1 ? 600 : j.hours <= 3 ? 1800 : 7200, off = -new Date().getTimezoneOffset() * 60;
+  for (let t = Math.ceil((t0 + off) / step) * step - off; t <= t1; t += step) if (X(t) <= g.R - 14) el('text', { x: X(t), y: g.B + 14, 'text-anchor': 'middle' }, svg, hhmm(t));
+  el('text', { x: g.L, y: 8 }, svg, 'round trip (ms)');
+  const w = Math.max(1.5, Math.min(8, (g.R - g.L) / Math.max(1, j.hours * 3600 / Math.max(10, (settings.presence_every_s || 30)))));
+  s.forEach(x => {
+    if (x[1]) { const r = el('circle', { class: 'pok', cx: X(x[0]), cy: Y(x[2]), r: s.length > 200 ? 1.5 : 2.6 }, svg); el('title', {}, r, hhmm(x[0]) + ' · answered in ' + x[2] + ' ms (' + x[3] + ')'); }
+    else { const r = el('rect', { class: 'pmiss', x: X(x[0]) - w / 2, y: g.T, width: w, height: g.B - g.T }, svg); el('title', {}, r, hhmm(x[0]) + ' · no answer from ' + (x[3] || 'any address')); }
+  });
+  if (!s.length) el('text', { x: 240, y: 55, 'text-anchor': 'middle' }, svg, 'no pings in this period yet');
+  const body = $('pRecent'); body.textContent = '';
+  s.slice(-6).reverse().forEach(x => {
+    const tr = document.createElement('tr'), c = (t, cls) => { const td = document.createElement('td'); if (cls) td.className = cls; td.textContent = t; tr.appendChild(td); };
+    c(hhmm(x[0])); c(x[1] ? 'answered' : 'no answer'); c(x[1] ? x[2] + ' ms' : '–', 'n'); c(x[3] || '–');
     body.appendChild(tr);
   });
 }
@@ -516,7 +613,7 @@ function drawReports(j) {
   });
 }
 async function loadSamples() {
-  try { GAP_MIN = Math.max(6, 3 * (settings.report_idle_s || 60) / 60); const j = await api('/api/samples?hours=' + range); drawRate(j); drawReports(j); } catch (e) { if (e.message !== 'token') msg('Cannot load reports: ' + e.message, 'err'); }
+  try { GAP_MIN = Math.max(6, 3 * (settings.report_idle_s || 60) / 60); const j = await api('/api/samples?hours=' + range); drawRate(j); drawReports(j); drawPings(await api('/api/pings?hours=' + Math.min(range, 12))); } catch (e) { if (e.message !== 'token') msg('Cannot load reports: ' + e.message, 'err'); }
 }
 document.querySelectorAll('#rng button').forEach(b => b.onclick = () => {
   range = Number(b.dataset.h);

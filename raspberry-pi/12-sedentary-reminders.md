@@ -22,7 +22,7 @@ A small container, `steps`, nags you through ntfy when your phone's step counter
   - Labels can have emojis and `{min}` (minutes sitting) and `{time}` (clock time); quotes and backslashes are not allowed.
   - The phone can only react when it reports, so from 2 minutes before the first level with an alarm the phone is asked to report every 20 s.
 - **Buttons.** Every reminder has snooze buttons of **30, 5 and 1 min**, but the long ones go away as you sit longer: 30 min only below 90 min of sitting (1 h 30), 5 min below 110 (1 h 50), and 1 min always. These limits are settings. The page shows the ones currently offered, and the Pi refuses a snooze that is not offered. Every snooze PAUSES the sitting timer: it is frozen and carries on from the same value afterwards (it is not reset). Real walking during a snooze still resets it.
-- **Notifications.** Each type has its own title, message, priority and (for levels) repeat interval on the page, with a **Test** button: the four levels, "Moved enough, timer reset", snoozed, snooze ended and phone silent. Texts can use `{min}`, `{snooze}`, `{steps}` and `{stale}`. "Moved enough" is sent when you walk enough while a reminder was active.
+- **Notifications.** Each type has its own title, message, priority and (for levels) repeat interval on the page, with a **Test** button: the four levels, "Moved enough, timer reset", snoozed, snooze ended and phone silent. Texts can use `{min}`, `{snooze}`, `{steps}` and `{stale}`. "Moved enough" is sent when you walk enough while a reminder was active; it is priority 4 like level 2 (sound and a pop-up over other apps, so you can stop walking), with the timers dismissed at the same moment.
 - No reminders from 22:00 to 07:00 (America/Sao_Paulo), and none while the phone has been silent for 30 min (you get one low-priority notice).
 
 All numbers are settings. They start from the optional values in `~/steps/config.env` (`LEVELS_MIN`, `REPEAT_S` for level 4, `MOVE_STEPS`, `QUIET_HOURS`) and are changed in the web page below, which wins once saved.
@@ -66,6 +66,24 @@ Token in `X-Token` or `?t=`. `/steps?steps=N`, `POST /snooze?min=5` (only length
 ## If the phone loop misbehaves
 
 The loop writes what it does to `~/steps-loop.log` on the phone (kept under about 200 KB): each report with the Pi's reply, and for an alarm the volume it set, the phrase and the exit code of the text-to-speech command (124 = it hung and was stopped after 25 s). Every Termux command has a timeout, so one stuck command cannot freeze the loop. Look with `tail -20 ~/steps-loop.log`; run it in the foreground with `bash -x ~/steps-loop.sh` to see every command. The Pi side shows when the phone last reported on `steps.lan` (Phone data).
+
+## Away from home (phone presence)
+
+The phone's Wi-Fi stays on at home, and the Pi pings it every 60 s (`presence_every_s`; the Pi pinging costs the phone less battery than the phone sending). The phone is found by its Wi-Fi MAC address (`presence_mac`), because its IP changes (it changed once): the Pi tries the address it last had, the optional `presence_ip`, and every address its neighbour table lists for that MAC, and a reply only counts if the table shows the phone's MAC for that address. The phone that sends the step reports is **a different phone** (the main one, which stays home), so its reports do not count as presence; only pings to the street phone do.
+
+- **Away** = no ping answer for `presence_away_min` (default 8) minutes. The sitting timer is then **paused from the last time the phone was seen**, like a snooze: reminders and phone alarms stop and the Clock timers are dismissed at the next report. When the phone is back the timer **carries on from the same value** (not reset). A snooze active at that moment ends when you leave.
+- The state is kept in `state.json`, so a restart keeps you away until the next ping answers.
+- The page shows a banner and a grayed timer while away, and a *Phone at home* card with the last ping, the answered/missed pings of the last 1 to 12 h and the last 6 results. `GET /api/pings?hours=3` gives the data. Settings are on the page (name, MAC, address to try first, ping interval, minutes before away).
+- Needs the phone's Wi-Fi on at home and `ping` in the container (the Alpine image has it; it works as uid 1000 because of the host's `ping_group_range`). Phones in power-save answer slowly (about 300 ms) and may miss a ping, which is why one miss is not enough to be away.
+
+### Steps from the street phone
+
+The street phone (also yours) does no looping and holds no wake-lock. Android's job scheduler starts [pi/steps/street-steps.sh](pi/steps/street-steps.sh) (installed by [pi/steps/street-setup.sh](pi/steps/street-setup.sh)): one job every 15 min on any network, and one every 15 min only on an unmetered network (Wi-Fi), which Android runs soon after the phone joins the home Wi-Fi, so nothing polls for Wi-Fi. Each run appends `time counter` to `~/.steps-queue` and tries to send the whole queue in one `POST /steps/batch?device=street`; out of the house the send fails quickly and the samples wait (up to about a week).
+
+- The Pi credits the steps between samples to the day and hour they happened (15-minute detail), keeps the last counter in `street.json` and shows today's street steps and the last upload on the *Phone at home* card.
+- **Walking outside resets the sitting timer**: a batch with at least *Steps that count as moving* (200) steps resets it, as real walking does (and sends the "moved" notice if a reminder was active). Steps are only counted by the phone that is carried; if both phones are on you, they are added up.
+- Presence is still only the Pi's ping, which costs the phone almost nothing (the Wi-Fi chip answers; a phone sending would have to wake the CPU and radio).
+- Setup on the phone: install Termux and Termux:API from F-Droid, `pkg install termux-api curl`, put `PI=` and `TOKEN=` in `~/.steps-env`, then `curl -fsS http://192.168.0.250:8097/street.sh -o ~/street-steps.sh` and run `bash ~/street-setup.sh` (it fetches the script and schedules both jobs). Leave Termux's battery setting on *Optimized* (not *Restricted*), or the jobs may never run. Check `tail ~/street-steps.log`.
 
 ## Long periods (phone left at home)
 

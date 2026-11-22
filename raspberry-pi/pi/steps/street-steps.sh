@@ -1,0 +1,30 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Street phone: log the step counter and send the backlog to the Pi when it is reachable.
+# No loop and no wake-lock: Android's job scheduler starts this script (see street-setup.sh), so the
+# phone does nothing in between. Out of the house the samples pile up in ~/.steps-queue; on the home
+# Wi-Fi they are sent in one request and the Pi credits the steps and resets the sitting timer.
+# Needs ~/.steps-env with PI=http://192.168.0.250:8097 and TOKEN=...
+# Fetched from the Pi: curl -fsS http://192.168.0.250:8097/street.sh -o ~/street-steps.sh
+. ~/.steps-env
+Q=~/.steps-queue
+LOG=~/street-steps.log
+log() { echo "$(date +%m-%d\ %H:%M:%S) $*" >> "$LOG"; }
+
+out=$(timeout 20 termux-sensor -s "Step Counter" -n 1 2>/dev/null)
+n=$(printf '%s' "$out" | grep -A2 '"values"' | grep -oE '[0-9]+(\.[0-9]+)?' | head -1 | cut -d. -f1)
+[ -n "$n" ] && echo "$(date +%s) $n" >> "$Q" || log "no step counter reading"
+[ -s "$Q" ] || exit 0
+tail -n 700 "$Q" > "$Q.tmp" && mv "$Q.tmp" "$Q"        # keep about a week at one sample per 15 min
+
+cnt=$(wc -l < "$Q")
+body=$(head -n "$cnt" "$Q" | awk 'BEGIN{printf "{\"samples\":["} {printf "%s[%s,%s]", (NR>1?",":""), $1, $2} END{print "]}"}')
+if r=$(curl -fsS -m 10 --connect-timeout 4 -X POST -H "X-Token: $TOKEN" -H "Content-Type: application/json" \
+       -d "$body" "$PI/steps/batch?device=street" 2>&1); then
+  tail -n +$((cnt + 1)) "$Q" > "$Q.tmp"; mv "$Q.tmp" "$Q"    # sent: drop exactly what was sent
+  log "sent $cnt samples: $r"
+else
+  log "Pi not reachable, $cnt samples kept"
+fi
+# keep the log small
+[ "$(wc -c < "$LOG")" -gt 100000 ] && tail -n 200 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+exit 0
