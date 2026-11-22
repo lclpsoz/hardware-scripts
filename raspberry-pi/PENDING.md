@@ -37,44 +37,6 @@ What is still open on the Pi and the laptop-side services, in priority order. Up
 
 ## 5. Future services (not started)
 
-### Speed-test client: the Pi asks the laptop for a full speed test
+### Speed-test client: written, waiting for deploy
 
-**Why:** the Pi's own speed test is capped by its 100 Mbps Ethernet port and its 600 MHz CPU (about 94 Mbps at best), so it can't show what the line really delivers. The laptop can. A good measurement also needs the context at the moment of the test.
-
-**What it should do** (the owner's request, to be refined when it is built):
-
-1. **The Pi can request a test from the laptop.** For example a button on net.lan ("Run laptop speed test") and an optional schedule.
-2. **The laptop runs a full-speed test** (download, upload, latency under load) with no Pi cap.
-3. **At the same moment it records the network health around the test:**
-   - **Wi-Fi:** the connected network and band, signal strength, link rate, retries.
-   - **Ethernet:** link speed, duplex and error counters, if cabled.
-   - **Quality:** latency, jitter and packet loss to the router, the ISP gateway and Cloudflare during the test.
-   - **qBittorrent:** whether it is running, and how much it is downloading and uploading **at the same time as the test**, so a low result can be explained ("torrents used 70 Mbps") instead of blamed on the line.
-4. **The result goes back to the Pi:** shown on net.lan next to the Pi's own tests (marked as "laptop"), with the context, and optionally a short ntfy message ("Laptop speed test: 480 / 95 Mbps, qBittorrent downloading at 60 Mbps").
-
-**How it would fit the existing pieces:**
-
-- Lives in [laptop/services/](laptop/README.md) as `speedtest/` (its own `run.sh`, systemd user units), using the shared `notify`, `pi` and `state` helpers.
-- The laptop can't be reached from the Pi reliably (it moves, it sleeps), so the **laptop asks the Pi**: it polls a small endpoint on net.lan every minute or two for "a test was requested", runs it, and posts the result back. When the laptop is off the request simply waits (and expires).
-- Needs a new small endpoint in netq (request, result) and a "laptop" series on the speed chart.
-- Tools to evaluate: the Cloudflare speed endpoints netq already uses (no account), `iperf3` to the Pi (limited by the Pi's port, so not for the line), Ookla's or LibreSpeed's CLI; `iw`/`nmcli`/`ethtool` for the link; qBittorrent's Web API (`/api/v2/transfer/info`) for the rates and process check for "running".
-
-**Open questions for then:** which test tool; whether to pause the torrents for a second "clean" run; whether to run on a schedule or only on request; what happens on battery or away from home.
-
-*This is a planned example of a future service for the laptop framework. Nothing is built yet.*
-
-## 6. Proposed, not scheduled
-
-- Docker log rotation defaults (`/etc/docker/daemon.json`), Pi-hole `database.maxDBdays` 30 (the database is 86 MB), slower container healthchecks.
-- Tailscale for remote access: it would also let ntfy reach the phone away from home, and give real HTTPS certificates ([06](06-ideas.md)).
-- **HTTPS for the `.lan` names** ("we will see when"): options and downsides in [07-services.md](07-services.md#https-for-the-lan-names). Not planned now.
-- Other ideas in [06-ideas.md](06-ideas.md).
-
-## 7. Decided and closed
-
-- TV name: "Samsung TV (Home)" is fine.
-- Ray's devices: no Guest group; named `Ray <model>` with owner Ray ([03](03-netalertx.md#device-naming-pattern-set-2026-11-20)).
-- HDMI: off, fine as it is.
-- Pi-hole limits: left open on purpose, see the table above.
-- Moving the dpkg-db-backup timer off midnight: **dropped.** It finishes in 5 seconds under its 20% CPU quota, and only 3 of the 52 recorded undervoltage events happened in the midnight hour, so it isn't a real cause.
-- Housekeeping: this repo has many commits on `main`, not pushed; it is public, so check before pushing.
+Designed and built 2026-11-21: [13-laptop-netprobe.md](13-laptop-netprobe.md). Code is in `laptop/services/netprobe/` and `pi/netq/netq.py`; tested on the laptop and in demo mode. **Not yet on the Pi.** Deploy steps: create `~/netq/config.env` with a token, set `NETQ_TOKEN` in the laptop config, copy `netq.py` and the compose file to `~/netq`, `docker compose up -d`, then `bash raspberry-pi/laptop/install.sh`. The improvement ideas are listed at the end of the doc.

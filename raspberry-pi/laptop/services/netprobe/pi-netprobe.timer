@@ -1,0 +1,10 @@
+[Unit]
+Description=Every minute: tell the Pi the laptop is up, and run a speed test if the Pi asks
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

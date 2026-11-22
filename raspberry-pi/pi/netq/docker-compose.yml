@@ -11,12 +11,15 @@ services:
       - ALL
     cap_add:
       - NET_RAW                   # ICMP echo (ping) through a raw socket
+    env_file: config.env          # NETQ_LAPTOP_TOKEN (secret, not in the repo)
     environment:
       NETQ_BIND: 127.0.0.1        # only the proxy talks to it
       NETQ_PORT: "8098"
       NETQ_PING: router=192.168.0.1,isp=100.66.64.1,cloudflare=1.1.1.1,google=8.8.8.8
       NETQ_DNS: pihole=127.0.0.1,pihole_new=127.0.0.1,forwarder=127.0.0.1:5053,cloudflare=1.1.1.1,google=8.8.8.8
       NETQ_SPEED_EVERY_H: "6"     # 0 turns the scheduled speed test off
+      NETQ_LAPTOP_SPEED_EVERY_MIN: "60"   # laptop full-speed test; 0 = only the button
+      NETQ_LAPTOP_MAX_MB: "300"           # per direction: caps the data one test uses
     volumes:
       - ./netq.py:/app/netq.py:ro
       - ./data:/data

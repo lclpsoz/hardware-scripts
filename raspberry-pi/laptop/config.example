@@ -4,3 +4,7 @@ NTFY_TOPIC=change-me-to-a-long-random-string
 # PI_HOST=pi
 # BACKUP_DIR=$HOME/backups/rasp-al-gaib-lite
 # BACKUP_KEEP=14
+# Speed test the Pi asks this laptop to run (must equal NETQ_LAPTOP_TOKEN in ~/netq/config.env on the Pi)
+NETQ_TOKEN=change-me-to-a-long-random-string
+# NETQ_URL=http://net.lan
+# QBIT_URL=http://127.0.0.1:8080     # qBittorrent Web UI, for exact torrent rates (optional)

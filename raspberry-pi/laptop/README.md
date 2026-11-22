@@ -9,6 +9,7 @@ laptop/
   install.sh               installs/removes the user units of every service below
   services/
     backup/                daily backup of the Pi to this laptop   (run.sh + pi-backup.{service,timer})
+    netprobe/              heartbeat every minute + full-speed test when the Pi asks (probe.py, run.sh, pi-netprobe.{service,timer})
 ```
 
 ## Use
@@ -34,6 +35,15 @@ If you move the repo, run `install.sh` again: the units hold the path.
 
 Restore steps are in [../README.md](../README.md#backups).
 
+## The netprobe service
+
+Runs every minute. It tells netq on the Pi that the laptop is up (uptime, time spent suspended, Wi-Fi or Ethernet, traffic rate, whether qBittorrent runs) and, when the Pi's answer says so, runs a full-speed test and sends back the result with its context. Needs `NETQ_TOKEN` in the config (same value as `NETQ_LAPTOP_TOKEN` on the Pi). Away from home it fails quietly and the Pi sees a gap. Details: [../13-laptop-netprobe.md](../13-laptop-netprobe.md).
+
+```bash
+tail ~/.local/state/pi-ops/netprobe.log      # tests and state changes only, not every heartbeat
+bash raspberry-pi/laptop/services/netprobe/run.sh    # one round now
+```
+
 ## Add a service
 
 1. Create `services/<name>/run.sh`. Start with:
@@ -47,4 +57,4 @@ Restore steps are in [../README.md](../README.md#backups).
 2. Add `pi-<name>.service` (`ExecStart=@DIR@/run.sh`) and, if it is periodic, `pi-<name>.timer`. `@DIR@` is replaced with the folder by `install.sh`.
 3. Run `bash raspberry-pi/laptop/install.sh`.
 
-A planned example is in [../PENDING.md](../PENDING.md) (speed tests started by the Pi and run by the laptop).
+Example of a Pi-driven service: `netprobe`.

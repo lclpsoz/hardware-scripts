@@ -1,0 +1,9 @@
+[Unit]
+Description=Heartbeat to netq on the Pi, and speed test when the Pi asks for one
+
+[Service]
+Type=oneshot
+ExecStart=@DIR@/run.sh
+Nice=10
+# A test is about 25 s; stop it if something hangs
+TimeoutStartSec=180
