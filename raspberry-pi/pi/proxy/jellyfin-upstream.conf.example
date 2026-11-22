@@ -1,0 +1,3 @@
+# Copy to ~/proxy/jellyfin-upstream.conf on the Pi (not tracked: it names a personal machine).
+# Address of the laptop running Jellyfin. Give it a DHCP reservation so it does not change.
+set $jellyfin_upstream "LAPTOP_IP:8096";

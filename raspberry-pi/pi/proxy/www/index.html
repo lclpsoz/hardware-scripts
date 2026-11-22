@@ -25,6 +25,7 @@
            padding: 14px 16px; color: inherit; text-decoration: none; transition: border-color .15s; }
   a.card { display: flex; gap: 14px; align-items: center; }
   .ico { width: 48px; height: 48px; border-radius: 22%; background: var(--c); display: flex; align-items: center; justify-content: center; flex: none; }
+  img.ico { background: none; border-radius: 0; }
   .ico svg { width: 84%; height: 84%; overflow: visible; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .body { min-width: 0; flex: 1; }
   a.card:hover, a.card:focus-visible { border-color: var(--accent); outline: none; }
@@ -112,6 +113,14 @@
         <div class="top"><span class="dot"></span><span class="name">Focus</span></div>
         <div class="what">Open a blocked site on the work laptop for a few minutes</div>
         <div class="url">focus.lan</div>
+      </div>
+    </a>
+    <a class="card" href="http://jellyfin.lan/" data-check="http://jellyfin.lan/health">
+      <img class="ico" src="jellyfin.png" alt="" width="48" height="48">
+      <div class="body">
+        <div class="top"><span class="dot"></span><span class="name">Jellyfin</span></div>
+        <div class="what">Movies and shows, served from the main laptop</div>
+        <div class="url">jellyfin.lan</div>
       </div>
     </a>
     <a class="card" href="http://192.168.0.1/" data-check="http://192.168.0.1/">
