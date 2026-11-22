@@ -97,6 +97,34 @@ Cheap mitigations while you wait for a new supply. These are proposals only, and
 
 These only reduce the count of load-triggered events. They do nothing for idle events.
 
+## Update 22 Nov: the last 24 hours
+
+Checked 2026-11-22 12:10 to 12:25, from the kernel log, `uv-events.log` and the flight recorder (`/var/log/uv-flight/events.jsonl`, 1 sample a second). There were **7 events in 24 hours** (21 Nov 18:15, 22 Nov 00:11, 06:16, 06:26, 07:37, 08:42, 09:19), each 4-6 s. The flight recorder shows the second-by-second load before each one:
+
+| Detected | Just before the drop |
+| --- | --- |
+| 21 Nov 18:15 | A docker + containerd burst of about 1.8 s of CPU (a healthcheck `docker exec`) |
+| 22 Nov 00:11 | A Pi-hole burst at about 90% of a core, 3-4 s earlier |
+| 22 Nov 06:16 | A docker + containerd burst of about 1.2 s of CPU |
+| 22 Nov 06:26 | Only NetAlertX at its cap |
+| 22 Nov 07:37 | A Pi-hole burst at about 84% of a core, 2-3 s earlier |
+| 22 Nov 08:42 | Only NetAlertX at its cap |
+| 22 Nov 09:19 | The laptop's `pi-backup` (started 09:18:05): `gzip` at 87%, `docker run … tar`, `dockerd` |
+
+- **NetAlertX was at its 0.5 CPU cap in the 1-3 s before all 7 events,** and in about 40% of the seconds sampled. It is the constant background load, not the trigger. I did not find what its python process (about 17% of a core on average) does all the time; reading its log from the host would show.
+- **Idle events:** at 4 of the 7 events `top` shows nothing busy. As on 19 Nov, the supply sits just above the threshold, and any small step crosses it.
+- The Pi-hole bursts at 00:11 and 07:37 are not explained yet. A guess is the database write (`DBinterval` 300 s); not checked.
+
+**Applied (temporary):** Pi-hole and NetAlertX healthchecks every 5 min instead of 30 s, to remove the `docker exec` bursts ([CHANGES.md](CHANGES.md)). It is too early to show a result. Compare the daily event count over the next days with the 7 above (5-7 on previous days).
+
+**Tried and reverted: compressing the backup on the laptop.** The idea was that `nice` does not stop the Pi-side `gzip` from using a whole core for about 90 s. I changed `backup-pi.sh` to stream plain `tar cf -` and gzip on the laptop, and ran it twice. The old script caused 1 event (09:19). The new one caused 5 events (12:19-12:20) and then 3 (12:20-12:21), with a run time of 55 s and 45 s. Both runs are confounded, because the first overlapped the restart of the two containers and the second started while the load average was still 1.98. Even so, there is no sign of an improvement, and sending 3-4 times more data through ssh encryption on the Pi's CPU probably cancels the gzip saving. The script is back to the original. The next idea, untested: keep gzip on the Pi, but slow the stream from the laptop side (for example `pv -L 2m` on the receiving end) so that the Pi's `tar` and `sshd` run at a low duty cycle. The laptop's 12:19 and 12:20 backups are valid and verified.
+
+Other ideas judged not worth it: lowering NetAlertX to 0.25 CPU (a CPU quota makes the load pulse, so the effect is unknown), `maxcpus=2`, turning the LEDs off (a few tens of mA at most). The governor is already at its 600 MHz minimum and HDMI is already off.
+
+**Free physical tests, probably the most effective:** use the shortest, thickest micro-USB cable available and a known-good 5 V ≥2.5 A charger, plugged straight into the wall; check that the connector is seated. The supply and cable in use now are still unknown (see "What fixes it").
+
+**When the new supply works:** revert the healthcheck change as step 5 in [04-resource-limits.md](04-resource-limits.md#order-to-lift-them-once-the-supply-is-fixed).
+
 ## What fixes it
 
 1. **Tell me which supply and cable are used now.** Brand and model, rated voltage and current, captive or separate cable, and its length. Also what else is on the strip.

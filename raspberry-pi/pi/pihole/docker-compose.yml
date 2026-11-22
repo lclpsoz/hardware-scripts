@@ -12,3 +12,7 @@ services:
     volumes:
       - ./etc-pihole:/etc/pihole
     restart: unless-stopped
+    # Undervoltage workaround (22 Nov): the image checks every 30 s, and each docker exec wakes dockerd and containerd.
+    # Remove this block to go back to the image default when the new power supply is confirmed good.
+    healthcheck:
+      interval: 5m

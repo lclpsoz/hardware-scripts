@@ -45,6 +45,9 @@ services:
         max-size: 5m
         max-file: "2"
     restart: unless-stopped
+    # Undervoltage workaround (22 Nov): image default is every 30 s. Remove this block when the new power supply is confirmed good.
+    healthcheck:
+      interval: 5m
 
 volumes:
   netalertx_data:
