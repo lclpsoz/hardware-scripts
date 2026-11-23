@@ -16,6 +16,10 @@ What is still open on the Pi and the laptop-side services, in priority order. Up
 - **ntfy alerts**: done 2026-11-21 ([11-notifications.md](11-notifications.md)). Covers services, DNS, internet (netq), encrypted DNS, undervoltage and the flight recorder, backup age, Pi-hole messages (DNS limit and others), updates, system health, reboots, and new devices. Tune the thresholds after a week of real use.
 - **Daily backup with notification**: done 2026-11-21, to the laptop, 14 kept ([laptop/README.md](laptop/README.md)). A **second copy off the laptop** (USB drive or an encrypted cloud copy) is not done: decide whether you want one.
 
+## 2b. Parked projects
+
+- **Estimate work time from Pi-hole queries of the work laptop**: first pass done 2026-11-21, not being worked on. Method, caveats and next steps in [14-work-time-estimate.md](14-work-time-estimate.md).
+
 ## 3. Waiting on something outside
 
 | Item | Waiting for | Then |
